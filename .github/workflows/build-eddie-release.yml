@@ -20,7 +20,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   REGISTRY_NAMESPACE: flexidata-at
-  IMAGE_NAME: eddie
+  IMAGE_NAME: valandex-eddie
 
 jobs:
   validate:
@@ -78,6 +78,7 @@ jobs:
           latest: ${{ inputs.latest }}
           eddie: 'true'
           aiida: 'false'
+          eddie-image-name: ${{ env.IMAGE_NAME }}
 
   release:
     name: Create EDDIE GitHub release

@@ -30,6 +30,14 @@ inputs:
     description: 'Whether to build and push the AIIDA image'
     required: false
     default: 'true'
+  eddie-image-name:
+    description: 'EDDIE image name'
+    required: false
+    default: 'eddie'
+  aiida-image-name:
+    description: 'AIIDA image name'
+    required: false
+    default: 'aiida'
 
 runs:
   using: composite
@@ -83,14 +91,17 @@ runs:
       env:
         REGISTRY: ${{ inputs.registry }}
         NAMESPACE: ${{ inputs.namespace }}
+        PUBLISH_IMAGE_NAME: ${{ inputs.eddie-image-name }}
         VERSION: ${{ inputs.version }}
         LATEST: ${{ inputs.latest }}
       # language=bash
       run: |
         set -euo pipefail
         IMAGE_NAME=eddie
-        IMAGE_ID=$REGISTRY/$NAMESPACE/$IMAGE_NAME
+        PUBLISH_IMAGE_NAME=${PUBLISH_IMAGE_NAME:-$IMAGE_NAME}
         echo IMAGE_NAME: $IMAGE_NAME
+        echo PUBLISH_IMAGE_NAME: $PUBLISH_IMAGE_NAME
+        IMAGE_ID=$REGISTRY/$NAMESPACE/$PUBLISH_IMAGE_NAME
         echo IMAGE_ID: $IMAGE_ID
         echo VERSION: $VERSION
         docker tag "$IMAGE_NAME" "$IMAGE_ID:$VERSION"
@@ -119,14 +130,15 @@ runs:
       env:
         REGISTRY: ${{ inputs.registry }}
         NAMESPACE: ${{ inputs.namespace }}
+        PUBLISH_IMAGE_NAME: ${{ inputs.aiida-image-name }}
         VERSION: ${{ inputs.version }}
         TOKEN: ${{ inputs.token }}
         LATEST: ${{ inputs.latest }}
       # language=bash
       run: |
         set -euo pipefail
-        IMAGE_NAME=aiida
-        IMAGE_ID=$REGISTRY/$NAMESPACE/$IMAGE_NAME
+        PUBLISH_IMAGE_NAME=${PUBLISH_IMAGE_NAME:-aiida}
+        IMAGE_ID=$REGISTRY/$NAMESPACE/$PUBLISH_IMAGE_NAME
         echo $IMAGE_ID
         ./gradlew --no-daemon --stacktrace jib \
           --image "$IMAGE_ID:$VERSION" \

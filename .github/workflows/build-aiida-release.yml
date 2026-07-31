@@ -20,7 +20,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   REGISTRY_NAMESPACE: flexidata-at
-  IMAGE_NAME: aiida
+  IMAGE_NAME: valandex-aiida
 
 jobs:
   validate:
@@ -78,6 +78,7 @@ jobs:
           latest: ${{ inputs.latest }}
           eddie: 'false'
           aiida: 'true'
+          aiida-image-name: ${{ env.IMAGE_NAME }}
 
   release:
     name: Create AIIDA GitHub release
