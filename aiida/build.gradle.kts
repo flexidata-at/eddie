@@ -137,7 +137,7 @@ jib {
     to {
         image = System.getProperty("jib.to.image")
         auth {
-            username = "oauth2accesstoken"
+            username = System.getProperty("jib.to.auth.username")
             password = System.getProperty("jib.to.auth.password")
         }
     }
