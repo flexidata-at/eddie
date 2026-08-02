@@ -4,6 +4,7 @@
 package energy.eddie.regionconnector.at.eda.ponton;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.Name;
 
 import java.time.Duration;
@@ -49,6 +50,7 @@ public record PontonXPAdapterConfiguration(
     private static final Duration DEFAULT_CONNECTION_WATCHDOG_INTERVAL = Duration.ofMinutes(1);
     private static final Duration DEFAULT_CONNECTION_STATUS_TIMEOUT = Duration.ofMinutes(2);
 
+    @ConstructorBinding
     public PontonXPAdapterConfiguration {
         inboundConnections = inboundConnections <= 0 ? DEFAULT_INBOUND_CONNECTIONS : inboundConnections;
         outboundConnections = outboundConnections <= 0 ? DEFAULT_OUTBOUND_CONNECTIONS : outboundConnections;

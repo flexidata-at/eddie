@@ -6,6 +6,7 @@ package energy.eddie.regionconnector.at.eda.config;
 import jakarta.validation.constraints.AssertTrue;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.Name;
 
 import static java.util.Objects.requireNonNull;
@@ -21,6 +22,10 @@ import static java.util.Objects.requireNonNull;
 public record AtConfiguration(@Name("eligibleparty.id") String eligiblePartyId, @Nullable String energyCommunityId,
                               @Nullable String energyCommunityPartyId,
                               @Name("conversation-id.prefix") @Nullable String conversationIdPrefix) {
+    @ConstructorBinding
+    public AtConfiguration {
+    }
+
     public AtConfiguration(
             String eligiblePartyId,
             @Nullable String energyCommunityId,
