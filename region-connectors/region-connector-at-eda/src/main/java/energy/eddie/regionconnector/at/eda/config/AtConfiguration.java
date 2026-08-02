@@ -13,12 +13,22 @@ import static java.util.Objects.requireNonNull;
 /**
  * The main configuration for the EDA region connector.
  *
- * @param eligiblePartyId ID that will be used as the sender for all messages sent to EDA.
- *                        This ID must be registered with EDA at <a href="https://www.ebutilities.at/registrierung">ebUtilities</a>.
+ * @param eligiblePartyId       ID that will be used as the sender for all messages sent to EDA.
+ *                              This ID must be registered with EDA at <a href="https://www.ebutilities.at/registrierung">ebUtilities</a>.
+ * @param conversationIdPrefix  Optional prefix prepended to generated conversation IDs with a hyphen separator when set to a non-blank value.
  */
 @ConfigurationProperties("region-connector.at.eda")
 public record AtConfiguration(@Name("eligibleparty.id") String eligiblePartyId, @Nullable String energyCommunityId,
-                              @Nullable String energyCommunityPartyId) {
+                              @Nullable String energyCommunityPartyId,
+                              @Name("conversation-id.prefix") @Nullable String conversationIdPrefix) {
+    public AtConfiguration(
+            String eligiblePartyId,
+            @Nullable String energyCommunityId,
+            @Nullable String energyCommunityPartyId
+    ) {
+        this(eligiblePartyId, energyCommunityId, energyCommunityPartyId, null);
+    }
+
     @AssertTrue(message = "If the energy community ID has been set, the energy community party ID must also be set")
     public boolean isEnergyCommunityIdSetMustBeEnergyCommunityPartyIdAlsoSet() {
         return energyCommunityId != null && energyCommunityPartyId != null;
@@ -38,6 +48,13 @@ public record AtConfiguration(@Name("eligibleparty.id") String eligiblePartyId, 
                                                     "energyCommunityPartyId must not be null when requesting the party ID of an energy community");
             case ELIGIBLE_PARTY -> eligiblePartyId();
         };
+    }
+
+    public String conversationIdPartyIdFor(PartyIdType type) {
+        if (conversationIdPrefix == null || conversationIdPrefix.isBlank()) {
+            return partyIdFor(type);
+        }
+        return conversationIdPrefix.strip().replaceFirst("-+$", "") + "-" + partyIdFor(type);
     }
 
     public enum PartyIdType {

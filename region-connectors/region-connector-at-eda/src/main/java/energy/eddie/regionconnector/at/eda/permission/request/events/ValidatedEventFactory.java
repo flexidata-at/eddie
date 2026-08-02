@@ -48,7 +48,7 @@ public class ValidatedEventFactory {
         var type = dataNeedCalculation instanceof CESUJoinRequestDataNeedResult
                 ? AtConfiguration.PartyIdType.ENERGY_COMMUNITY
                 : AtConfiguration.PartyIdType.ELIGIBLE_PARTY;
-        var messageId = new MessageId(configuration.partyIdFor(type), created).toString();
+        var messageId = new MessageId(configuration.conversationIdPartyIdFor(type), created).toString();
         var cmRequestId = new CMRequestId(messageId).toString();
 
         return new ValidatedEvent(
