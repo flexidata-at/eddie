@@ -16,12 +16,15 @@ import static java.util.Objects.requireNonNull;
  *
  * @param eligiblePartyId       ID that will be used as the sender for all messages sent to EDA.
  *                              This ID must be registered with EDA at <a href="https://www.ebutilities.at/registrierung">ebUtilities</a>.
- * @param conversationIdPrefix  Optional prefix prepended to generated conversation IDs with a hyphen separator when set to a non-blank value.
+ * @param conversationIdPrefix  Optional prefix prepended to generated conversation IDs after removing characters not
+ *                              allowed by the Ponton GroupingId pattern.
  */
 @ConfigurationProperties("region-connector.at.eda")
 public record AtConfiguration(@Name("eligibleparty.id") String eligiblePartyId, @Nullable String energyCommunityId,
                               @Nullable String energyCommunityPartyId,
                               @Name("conversation-id.prefix") @Nullable String conversationIdPrefix) {
+    private static final String GROUPING_ID_INVALID_CHARACTERS = "[^0-9A-Za-z]";
+
     @ConstructorBinding
     public AtConfiguration {
     }
@@ -59,7 +62,11 @@ public record AtConfiguration(@Name("eligibleparty.id") String eligiblePartyId, 
         if (conversationIdPrefix == null || conversationIdPrefix.isBlank()) {
             return partyIdFor(type);
         }
-        return conversationIdPrefix.strip().replaceFirst("-+$", "") + "-" + partyIdFor(type);
+        var sanitizedPrefix = conversationIdPrefix.replaceAll(GROUPING_ID_INVALID_CHARACTERS, "");
+        if (sanitizedPrefix.isEmpty()) {
+            return partyIdFor(type);
+        }
+        return sanitizedPrefix + partyIdFor(type);
     }
 
     public enum PartyIdType {

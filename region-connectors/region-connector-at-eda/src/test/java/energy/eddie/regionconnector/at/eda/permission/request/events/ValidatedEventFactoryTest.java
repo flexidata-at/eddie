@@ -20,14 +20,21 @@ class ValidatedEventFactoryTest {
     void createValidatedEvent_prefixesConversationId() {
         var event = createValidatedEvent("TEST");
 
-        assertThat(event.conversationId()).startsWith("TEST-EP123456T");
+        assertThat(event.conversationId()).startsWith("TESTEP123456T");
     }
 
     @Test
-    void createValidatedEvent_addsOnlyOneHyphenWhenPrefixAlreadyEndsWithHyphen() {
-        var event = createValidatedEvent("TEST-");
+    void createValidatedEvent_filtersCharactersDisallowedInConversationIdPrefix() {
+        var event = createValidatedEvent("DEMO-");
 
-        assertThat(event.conversationId()).startsWith("TEST-EP123456T");
+        assertThat(event.conversationId()).startsWith("DEMOEP123456T");
+    }
+
+    @Test
+    void createValidatedEvent_usesEligiblePartyIdWhenConversationIdPrefixHasNoValidCharacters() {
+        var event = createValidatedEvent("-_+#");
+
+        assertThat(event.conversationId()).startsWith("EP123456T");
     }
 
     @Test
