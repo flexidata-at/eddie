@@ -117,7 +117,6 @@ tasks.register<PnpmTask>("pnpmBuildAiidaDocs") {
 sonar {
     properties {
         property("sonar.projectName", "EDDIE")
-        property("sonar.projectKey", "eddie-energy")
         property(
             "sonar.coverage.jacoco.xmlReportPaths",
             "${project.rootDir}/build/reports/jacoco/codeCoverageReport/codeCoverageReport.xml"
