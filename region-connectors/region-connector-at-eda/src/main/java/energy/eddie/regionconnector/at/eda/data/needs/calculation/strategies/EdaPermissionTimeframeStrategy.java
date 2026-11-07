@@ -12,6 +12,8 @@ import jakarta.annotation.Nullable;
 
 import java.time.ZonedDateTime;
 
+import static energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata.AT_ZONE_ID;
+
 /**
  * A custom {@link PermissionTimeframeStrategy} that differentiates between energy community data needs and all others.
  * In Austria, permission timeframes for adding a new meter to an energy community must start between the next day or the next 30 days.
@@ -26,7 +28,7 @@ public class EdaPermissionTimeframeStrategy implements PermissionTimeframeStrate
             ZonedDateTime referenceDateTime
     ) {
         if (dataNeed instanceof CESUJoinRequestDataNeed) {
-            return new Timeframe(referenceDateTime.plusDays(1).toLocalDate(), null);
+            return new Timeframe(referenceDateTime.withZoneSameInstant(AT_ZONE_ID).toLocalDate().plusDays(1), null);
         }
         return fallbackStrategy.permissionTimeframe(energyDataTimeframe, dataNeed, referenceDateTime);
     }

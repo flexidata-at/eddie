@@ -25,6 +25,10 @@ public class DuplicateDataFilter implements UnaryOperator<IdentifiableConsumptio
 
     @Override
     public IdentifiableConsumptionRecord apply(IdentifiableConsumptionRecord consumptionRecord) {
+        if (consumptionRecord.consumptionRecord().energyCommunityId().isPresent()) {
+            // A repeated period can contain corrected allocations. Consumers deduplicate by market message identity.
+            return consumptionRecord;
+        }
         List<AtPermissionRequest> filteredRequests = new ArrayList<>();
         for (var permissionRequest : consumptionRecord.permissionRequests()) {
             var readings = repository.findAllByPermissionId(permissionRequest.permissionId());

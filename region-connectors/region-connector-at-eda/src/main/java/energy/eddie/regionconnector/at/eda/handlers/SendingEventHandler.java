@@ -49,10 +49,9 @@ public class SendingEventHandler implements EventHandler<ValidatedEvent> {
         String permissionId = permissionEvent.permissionId();
         AtPermissionRequest permissionRequest = repository.getByPermissionId(permissionId);
 
-        CCMORequest ccmoRequest = ccmoRequest(permissionRequest, permissionEvent);
         try {
-            edaAdapter.sendCMRequest(ccmoRequest);
-        } catch (TransmissionException e) {
+            edaAdapter.sendCMRequest(ccmoRequest(permissionRequest, permissionEvent));
+        } catch (TransmissionException | IllegalArgumentException e) {
             outbox.commit(new ExceptionEvent(permissionId, PermissionProcessStatus.UNABLE_TO_SEND, e));
         }
     }

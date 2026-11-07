@@ -3,6 +3,8 @@
 
 package energy.eddie.regionconnector.at.eda.dto;
 
+import org.jspecify.annotations.Nullable;
+
 import java.time.LocalDate;
 
 public interface EdaCMRevoke {
@@ -11,4 +13,8 @@ public interface EdaCMRevoke {
     String consentId();
 
     LocalDate consentEnd();
+
+    default @Nullable String senderMessageAddress() {return null;}
+
+    default @Nullable String receiverMessageAddress() {return null;}
 }

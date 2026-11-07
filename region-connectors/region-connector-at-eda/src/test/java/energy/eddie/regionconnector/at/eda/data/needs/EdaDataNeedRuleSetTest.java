@@ -5,14 +5,17 @@ package energy.eddie.regionconnector.at.eda.data.needs;
 
 import energy.eddie.api.agnostic.Granularity;
 import energy.eddie.api.agnostic.data.needs.EnergyType;
+import energy.eddie.dataneeds.needs.DataNeed;
 import energy.eddie.dataneeds.rules.DataNeedRule;
 import energy.eddie.dataneeds.rules.DataNeedRule.AccountingPointDataNeedRule;
 import energy.eddie.dataneeds.rules.DataNeedRule.AllowMultipleDataNeedsRule;
 import energy.eddie.dataneeds.rules.DataNeedRule.ValidatedHistoricalDataDataNeedRule;
 import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -52,5 +55,21 @@ class EdaDataNeedRuleSetTest {
                                                                 List.of(Granularity.PT15M, Granularity.P1D)),
                         new AllowMultipleDataNeedsRule()
                 );
+    }
+
+    @Test
+    void requiresExplicitRegionAndAuthorizedCommunityForScopedNeeds() {
+        var ruleSet = new EdaDataNeedRuleSet(new AtConfiguration("rc", null, "", Set.of("community-a")));
+        var json = """
+                {"type":"cesu-join-request", "minGranularity":"PT15M", "maxGranularity":"PT15M",
+                 "energyCommunityId":"community-a",
+                 "regionConnectorFilter":{"type":"allowlist","regionConnectorIds":["at-eda"]}}
+                """;
+        var mapper = JsonMapper.builder().build();
+
+        assertThat(ruleSet.hasRuleFor(mapper.readValue(json, DataNeed.class))).isTrue();
+        assertThat(ruleSet.hasRuleFor(mapper.readValue(json.replace("community-a", "community-b"), DataNeed.class))).isFalse();
+        assertThat(ruleSet.hasRuleFor(mapper.readValue(json.replace("allowlist", "blocklist"), DataNeed.class))).isFalse();
+        assertThat(ruleSet.hasRuleFor(mapper.readValue(json.replace("\"at-eda\"", "\"at-eda\",\"es-datadis\""), DataNeed.class))).isFalse();
     }
 }

@@ -11,6 +11,9 @@ import energy.eddie.regionconnector.at.eda.processing.utils.XmlGregorianCalender
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Optional;
+
+import static energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata.AT_ZONE_ID;
 
 public record EdaConsumptionRecord01p41(ConsumptionRecord consumptionRecord) implements EdaConsumptionRecord {
     @Override
@@ -29,7 +32,18 @@ public record EdaConsumptionRecord01p41(ConsumptionRecord consumptionRecord) imp
     }
 
     @Override
+    public Optional<String> energyCommunityId() {
+        return Optional.ofNullable(consumptionRecord.getProcessDirectory().getECID());
+    }
+
+    @Override
     public LocalDate startDate() {
+        if (energyCommunityId().isPresent()) {
+            return consumptionRecord.getProcessDirectory().getEnergy().stream()
+                                    .map(energy -> XmlGregorianCalenderUtils.toUtcZonedDateTime(energy.getMeteringPeriodStart()))
+                                    .map(time -> time.withZoneSameInstant(AT_ZONE_ID).toLocalDate())
+                                    .min(LocalDate::compareTo).orElseThrow();
+        }
         return consumptionRecord.getProcessDirectory()
                                 .getEnergy()
                                 .getFirst()
@@ -42,6 +56,14 @@ public record EdaConsumptionRecord01p41(ConsumptionRecord consumptionRecord) imp
                                 .getEnergy()
                                 .getLast()
                                 .getMeteringPeriodEnd().toGregorianCalendar().toZonedDateTime().toLocalDate();
+    }
+
+    @Override
+    public LocalDate lastReadingDate() {
+        return consumptionRecord.getProcessDirectory().getEnergy().stream()
+                                .map(energy -> XmlGregorianCalenderUtils.toUtcZonedDateTime(energy.getMeteringPeriodEnd()))
+                                .map(time -> time.minusNanos(1).withZoneSameInstant(AT_ZONE_ID).toLocalDate())
+                                .max(LocalDate::compareTo).orElseThrow();
     }
 
     @Override

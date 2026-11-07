@@ -11,6 +11,8 @@ import energy.eddie.dataneeds.validation.BasicValidationsGroup;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.hibernate.validator.constraints.Range;
 import org.jspecify.annotations.Nullable;
 
@@ -44,6 +46,13 @@ public class CESUJoinRequestDataNeed extends DataNeed {
     @JsonProperty()
     @Nullable
     private final EnergyDirection energyDirection;
+    @Column(name = "energy_community_id", length = 128)
+    @JsonProperty
+    @Schema(description = "Market identifier of the energy community. The region connector must be authorized to act for this community.")
+    @Nullable
+    @Size(max = 128)
+    @Pattern(regexp = "\\S+")
+    private final String energyCommunityId;
 
     @SuppressWarnings("NullAway")
     public CESUJoinRequestDataNeed() {
@@ -51,6 +60,7 @@ public class CESUJoinRequestDataNeed extends DataNeed {
         this.maxGranularity = null;
         this.participationFactor = null;
         this.energyDirection = null;
+        this.energyCommunityId = null;
     }
 
     public CESUJoinRequestDataNeed(
@@ -59,11 +69,22 @@ public class CESUJoinRequestDataNeed extends DataNeed {
             Granularity maxGranularity,
             @Nullable EnergyDirection energyDirection
     ) {
+        this(participationFactor, minGranularity, maxGranularity, energyDirection, null);
+    }
+
+    public CESUJoinRequestDataNeed(
+            @Nullable Integer participationFactor,
+            Granularity minGranularity,
+            Granularity maxGranularity,
+            @Nullable EnergyDirection energyDirection,
+            @Nullable String energyCommunityId
+    ) {
         super();
         this.participationFactor = participationFactor;
         this.minGranularity = minGranularity;
         this.maxGranularity = maxGranularity;
         this.energyDirection = energyDirection;
+        this.energyCommunityId = energyCommunityId;
     }
 
     /**
@@ -103,5 +124,9 @@ public class CESUJoinRequestDataNeed extends DataNeed {
      */
     public Optional<EnergyDirection> energyDirection() {
         return Optional.ofNullable(energyDirection);
+    }
+
+    public Optional<String> energyCommunityId() {
+        return Optional.ofNullable(energyCommunityId);
     }
 }

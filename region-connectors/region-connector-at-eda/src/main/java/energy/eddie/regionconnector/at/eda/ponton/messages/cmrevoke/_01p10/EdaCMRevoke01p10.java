@@ -24,4 +24,14 @@ public record EdaCMRevoke01p10(CMRevoke cmRevoke) implements EdaCMRevoke {
         var end = cmRevoke.getProcessDirectory().getConsentEnd();
         return LocalDate.of(end.getYear(), end.getMonth(), end.getDay());
     }
+
+    @Override
+    public String senderMessageAddress() {
+        return cmRevoke.getMarketParticipantDirectory().getRoutingHeader().getSender().getMessageAddress();
+    }
+
+    @Override
+    public String receiverMessageAddress() {
+        return cmRevoke.getMarketParticipantDirectory().getRoutingHeader().getReceiver().getMessageAddress();
+    }
 }

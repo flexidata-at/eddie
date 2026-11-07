@@ -57,7 +57,7 @@ class EdaPermissionTimeframeStrategyTest {
         var res = strategy.permissionTimeframe(
                 null,
                 dataNeed,
-                ZonedDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC)
+                ZonedDateTime.of(2025, 12, 31, 23, 30, 0, 0, ZoneOffset.UTC)
         );
 
         // Then

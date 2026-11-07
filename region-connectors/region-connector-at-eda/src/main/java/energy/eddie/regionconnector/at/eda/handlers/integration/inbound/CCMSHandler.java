@@ -4,6 +4,9 @@
 package energy.eddie.regionconnector.at.eda.handlers.integration.inbound;
 
 import energy.eddie.cim.agnostic.PermissionProcessStatus;
+import energy.eddie.dataneeds.needs.CESUJoinRequestDataNeed;
+import energy.eddie.dataneeds.services.DataNeedsService;
+import energy.eddie.regionconnector.at.api.AtPermissionRequest;
 import energy.eddie.regionconnector.at.api.AtPermissionRequestRepository;
 import energy.eddie.regionconnector.at.eda.models.CMRequestStatus;
 import energy.eddie.regionconnector.at.eda.models.ResponseCode;
@@ -21,10 +24,13 @@ public class CCMSHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(CCMSHandler.class);
     private final Outbox outbox;
     private final AtPermissionRequestRepository repository;
+    private final DataNeedsService dataNeedsService;
 
-    public CCMSHandler(Outbox outbox, AtPermissionRequestRepository repository) {
+    public CCMSHandler(Outbox outbox, AtPermissionRequestRepository repository,
+                       @SuppressWarnings("SpringJavaInjectionPointsAutowiringInspection") DataNeedsService dataNeedsService) {
         this.outbox = outbox;
         this.repository = repository;
+        this.dataNeedsService = dataNeedsService;
     }
 
 
@@ -56,8 +62,15 @@ public class CCMSHandler {
                 continue;
             }
 
+            var isCesu = isCesu(permissionRequest);
+            if (isCesu && !matchesCesuReply(permissionRequest, cmRequestStatus)) {
+                continue;
+            }
             var permissionId = permissionRequest.permissionId();
-            for (Integer statusCode : cmRequestStatus.consentData().getFirst().responseCodes()) {
+            var responseCodes = cmRequestStatus.consentData().stream()
+                    .flatMap(data -> data.responseCodes().stream())
+                    .toList();
+            for (Integer statusCode : responseCodes) {
                 if (statusCode == ResponseCode.KnownResponseCodes.INVALID_PROCESSDATE.getCode()) {
                     LOGGER.error(
                             "Received a message that indicates that we send an invalid process date for the CMRevoke message for permission request '{}', this should never happen",
@@ -69,9 +82,15 @@ public class CCMSHandler {
                 }
             }
 
+            var absentOrExpired = !responseCodes.isEmpty() && responseCodes.stream().allMatch(code ->
+                    code == ResponseCode.KnownResponseCodes.NO_CONSENT_PRESENT.getCode()
+                    || code == ResponseCode.KnownResponseCodes.CONSENT_ID_EXPIRED.getCode());
+            var result = isCesu && !absentOrExpired
+                    ? PermissionProcessStatus.FAILED_TO_TERMINATE
+                    : PermissionProcessStatus.EXTERNALLY_TERMINATED;
             outbox.commit(
                     new EdaAnswerEvent(permissionId,
-                                       PermissionProcessStatus.EXTERNALLY_TERMINATED,
+                                       result,
                                        cmRequestStatus.message())
             );
         }
@@ -86,7 +105,8 @@ public class CCMSHandler {
                 .map(EdaPermissionRequest::fromProjection)
                 .toList()) {
             // the cmRequestId is not necessarily unique, only process permission requests that have been marked for external termination
-            if (permissionRequest.status() == PermissionProcessStatus.REQUIRES_EXTERNAL_TERMINATION) {
+            if (permissionRequest.status() == PermissionProcessStatus.REQUIRES_EXTERNAL_TERMINATION
+                    && (!isCesu(permissionRequest) || matchesCesuReply(permissionRequest, cmRequestStatus))) {
                 outbox.commit(
                         new EdaAnswerEvent(permissionRequest.permissionId(),
                                            PermissionProcessStatus.EXTERNALLY_TERMINATED,
@@ -94,5 +114,16 @@ public class CCMSHandler {
                 );
             }
         }
+    }
+
+    private boolean isCesu(AtPermissionRequest request) {
+        return dataNeedsService.findById(request.dataNeedId()).filter(CESUJoinRequestDataNeed.class::isInstance).isPresent();
+    }
+
+    private static boolean matchesCesuReply(AtPermissionRequest permission, CMRequestStatus response) {
+        return permission.conversationId().equals(response.conversationId())
+                && response.consentData().stream().anyMatch(data ->
+                        (data.cmConsentId().isEmpty() || data.cmConsentId().equals(permission.consentId()))
+                        && (data.meteringPoint().isEmpty() || data.meteringPoint().equals(permission.meteringPointId())));
     }
 }

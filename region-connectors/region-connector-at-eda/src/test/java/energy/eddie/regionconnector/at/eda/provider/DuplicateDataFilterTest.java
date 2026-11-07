@@ -4,10 +4,12 @@
 package energy.eddie.regionconnector.at.eda.provider;
 
 import energy.eddie.regionconnector.at.eda.SimplePermissionRequest;
+import energy.eddie.regionconnector.at.eda.dto.EdaConsumptionRecord;
 import energy.eddie.regionconnector.at.eda.dto.IdentifiableConsumptionRecord;
 import energy.eddie.regionconnector.at.eda.dto.SimpleEdaConsumptionRecord;
 import energy.eddie.regionconnector.at.eda.permission.request.projections.MeterReadingTimeframe;
 import energy.eddie.regionconnector.at.eda.persistence.MeterReadingTimeframeRepository;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -18,9 +20,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -99,6 +104,17 @@ class DuplicateDataFilterTest {
         assertThat(res).isEqualTo(id);
     }
 
+
+    @Test
+    void preservesCorrectionsForPreviouslyReceivedCommunityAllocationPeriods() {
+        var record = mock(EdaConsumptionRecord.class);
+        when(record.energyCommunityId()).thenReturn(Optional.of("community"));
+        var identified = new IdentifiableConsumptionRecord(record, List.of(createPermissionRequest()),
+                LocalDate.of(2024, 1, 1), LocalDate.of(2024, 1, 10));
+
+        assertThat(filter.apply(identified)).isSameAs(identified);
+        verifyNoInteractions(repository);
+    }
 
     private static SimplePermissionRequest createPermissionRequest() {
         return new SimplePermissionRequest("pid", "cid", "dnid");

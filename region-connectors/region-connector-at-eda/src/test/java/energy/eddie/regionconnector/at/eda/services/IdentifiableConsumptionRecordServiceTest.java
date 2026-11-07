@@ -5,7 +5,13 @@ package energy.eddie.regionconnector.at.eda.services;
 
 import energy.eddie.api.agnostic.Granularity;
 import energy.eddie.api.agnostic.data.needs.EnergyDirection;
+import energy.eddie.dataneeds.needs.AccountingPointDataNeed;
+import energy.eddie.dataneeds.needs.CESUJoinRequestDataNeed;
+import energy.eddie.dataneeds.needs.ValidatedHistoricalDataDataNeed;
+import energy.eddie.dataneeds.services.DataNeedsService;
+import energy.eddie.regionconnector.at.api.AtPermissionRequest;
 import energy.eddie.regionconnector.at.api.AtPermissionRequestProjection;
+import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
 import energy.eddie.regionconnector.at.eda.dto.*;
 import energy.eddie.regionconnector.at.eda.handlers.integration.inbound.AtPermissionRequestProjectionTest;
 import energy.eddie.regionconnector.at.eda.persistence.JpaPermissionRequestRepository;
@@ -21,10 +27,14 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -32,6 +42,9 @@ class IdentifiableConsumptionRecordServiceTest {
 
     @Mock
     private JpaPermissionRequestRepository repository;
+    @Mock
+    private DataNeedsService dataNeedsService;
+    private final AtConfiguration configuration = new AtConfiguration("community-party", null, "", Set.of("ec-a", "ec-b"));
 
     private static AtPermissionRequestProjection projection(String permissionId, String connectionId, String dataNeedId,
                                                             String cmRequestId, String conversationId) {
@@ -63,7 +76,9 @@ class IdentifiableConsumptionRecordServiceTest {
         ))
                 .thenReturn(permissionRequests);
 
-        IdentifiableConsumptionRecordService service = new IdentifiableConsumptionRecordService(repository);
+        when(dataNeedsService.findById("dataNeedId1")).thenReturn(Optional.of(new ValidatedHistoricalDataDataNeed()));
+        when(dataNeedsService.findById("dataNeedId2")).thenReturn(Optional.of(new ValidatedHistoricalDataDataNeed()));
+        IdentifiableConsumptionRecordService service = new IdentifiableConsumptionRecordService(repository, dataNeedsService, configuration);
 
         var result = service.mapToIdentifiableConsumptionRecord(identifiableConsumptionRecord);
 
@@ -83,11 +98,66 @@ class IdentifiableConsumptionRecordServiceTest {
                               any()))
                 .thenReturn(List.of());
 
-        IdentifiableConsumptionRecordService service = new IdentifiableConsumptionRecordService(repository);
+        IdentifiableConsumptionRecordService service = new IdentifiableConsumptionRecordService(repository, dataNeedsService, configuration);
 
         var result = service.mapToIdentifiableConsumptionRecord(unidentifiableConsumptionRecord);
 
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void communityAllocationReachesOnlyItsCommunityPermission() {
+        var record = mock(EdaConsumptionRecord.class);
+        var today = LocalDate.now(ZoneId.systemDefault());
+        when(record.energyCommunityId()).thenReturn(Optional.of("ec-a"));
+        when(record.receiverMessageAddress()).thenReturn("community-party");
+        when(record.senderMessageAddress()).thenReturn("dsoId");
+        when(record.meteringPoint()).thenReturn("meteringPointId");
+        when(record.startDate()).thenReturn(today);
+        when(record.endDate()).thenReturn(today.plusDays(1));
+        when(record.lastReadingDate()).thenReturn(today);
+        when(repository.findByMeteringPointIdAndDateAndStateSentToPAOrAfterAccepted("meteringPointId", today))
+                .thenReturn(List.of(projection("communityA", "a", "need-a", "req-a", "a"),
+                                    projection("communityB", "b", "need-b", "req-b", "b"),
+                                    projection("history", "h", "need-history", "req-h", "h"),
+                                    projection("masterData", "m", "need-master", "req-m", "m")));
+        when(dataNeedsService.findById("need-a")).thenReturn(Optional.of(communityNeed("ec-a")));
+        when(dataNeedsService.findById("need-b")).thenReturn(Optional.of(communityNeed("ec-b")));
+        when(dataNeedsService.findById("need-history")).thenReturn(Optional.of(new ValidatedHistoricalDataDataNeed()));
+        when(dataNeedsService.findById("need-master")).thenReturn(Optional.of(new AccountingPointDataNeed()));
+        var service = new IdentifiableConsumptionRecordService(repository, dataNeedsService, configuration);
+
+        var result = service.mapToIdentifiableConsumptionRecord(record).orElseThrow();
+        assertThat(result.permissionRequests()).extracting(AtPermissionRequest::permissionId).containsExactly("communityA");
+    }
+
+    @Test
+    void rejectsCommunityAllocationSentToDifferentMarketParty() {
+        var record = mock(EdaConsumptionRecord.class);
+        when(record.energyCommunityId()).thenReturn(Optional.of("ec-a"));
+        when(record.receiverMessageAddress()).thenReturn("ep");
+        var service = new IdentifiableConsumptionRecordService(repository, dataNeedsService, configuration);
+
+        assertThat(service.mapToIdentifiableConsumptionRecord(record)).isEmpty();
+    }
+
+    @Test
+    void ordinaryReadingForSharedMarketPartyDoesNotReachCommunityPermission() {
+        var record = createConsumptionRecord("meteringPointId");
+        when(repository.findByMeteringPointIdAndDateAndStateSentToPAOrAfterAccepted("meteringPointId", record.startDate()))
+                .thenReturn(List.of(projection("history", "h", "need-history", "req-h", "h"),
+                                    projection("communityA", "a", "need-a", "req-a", "a")));
+        when(dataNeedsService.findById("need-history")).thenReturn(Optional.of(new ValidatedHistoricalDataDataNeed()));
+        when(dataNeedsService.findById("need-a")).thenReturn(Optional.of(communityNeed("ec-a")));
+        var service = new IdentifiableConsumptionRecordService(repository, dataNeedsService, configuration);
+
+        var result = service.mapToIdentifiableConsumptionRecord(record).orElseThrow();
+
+        assertThat(result.permissionRequests()).extracting(AtPermissionRequest::permissionId).containsExactly("history");
+    }
+
+    private static CESUJoinRequestDataNeed communityNeed(String communityId) {
+        return new CESUJoinRequestDataNeed(100, Granularity.PT15M, Granularity.PT15M, EnergyDirection.CONSUMPTION, communityId);
     }
 
     private EdaConsumptionRecord createConsumptionRecord(String meteringPoint) {
@@ -113,6 +183,7 @@ class IdentifiableConsumptionRecordServiceTest {
     ) {
         return new SimpleEdaConsumptionRecord()
                 .setMeteringPoint(meteringPoint)
+                .setReceiverMessageAddress("community-party")
                 .setStartDate(meteringPeriodStart)
                 .setEndDate(meteringPeriodStart)
                 .setEnergy(List.of(
