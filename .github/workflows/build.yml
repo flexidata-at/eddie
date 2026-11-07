@@ -12,6 +12,10 @@ on:
       SONAR_TOKEN:
         required: false
 
+# Upstream AT EDA fixtures assert dates in the Vienna timezone.
+env:
+  TZ: Europe/Vienna
+
 permissions:
   contents: read
 
@@ -40,7 +44,7 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - name: Build and test
-        run: ./gradlew --no-daemon --max-workers=2 build integrationTest codeCoverageReport --stacktrace
+        run: ./gradlew --no-daemon --max-workers=2 --continue build integrationTest codeCoverageReport --stacktrace
       - name: Analyze main in FlexiData SonarQube
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:

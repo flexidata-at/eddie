@@ -16,7 +16,11 @@ The **Build and test** workflow runs on pull requests and pushes to `main`.
 It can also be started through **Actions > Build and test > Run workflow**.
 It uses GitHub hosted Ubuntu 24.04 runners, Temurin Java 21 and the checked in
 Gradle wrapper. The tasks match upstream: `build integrationTest codeCoverageReport`.
-Docker is provided by the hosted runner for Testcontainers. Gradle wrapper
+Docker is provided by the hosted runner for Testcontainers. CI sets
+`TZ=Europe/Vienna` because upstream AT EDA fixtures depend on the system timezone.
+The first hosted run exposed three failures under UTC; application code and test
+assertions are preserved. Gradle continues independent tasks after a failure so
+reports cover the remaining modules while the workflow still fails. Gradle wrapper
 validation and caching use the pinned upstream Gradle action. Reports are
 uploaded for successful and failed runs and retained for 14 days.
 
