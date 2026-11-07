@@ -11,7 +11,6 @@ import energy.eddie.cim.agnostic.RawDataMessage;
 import energy.eddie.cim.v1_12.ack.AcknowledgementEnvelope;
 import energy.eddie.regionconnector.aiida.AiidaBeanConfig;
 import energy.eddie.regionconnector.aiida.mqtt.callback.MqttMessageCallback;
-import energy.eddie.regionconnector.aiida.mqtt.events.MqttConnectedEvent;
 import energy.eddie.regionconnector.aiida.mqtt.message.processor.AiidaMessageProcessor;
 import energy.eddie.regionconnector.aiida.mqtt.message.processor.AiidaMessageProcessorRegistry;
 import energy.eddie.regionconnector.aiida.mqtt.message.processor.data.cim.v1_12.AcknowledgementCimMessageProcessor;
@@ -21,7 +20,6 @@ import energy.eddie.regionconnector.aiida.mqtt.topic.MqttTopic;
 import energy.eddie.regionconnector.aiida.mqtt.topic.MqttTopicType;
 import energy.eddie.regionconnector.aiida.permission.request.AiidaPermissionRequest;
 import energy.eddie.regionconnector.aiida.permission.request.persistence.AiidaPermissionRequestViewRepository;
-import energy.eddie.regionconnector.aiida.publisher.MqttEventPublisher;
 import nl.altindag.log.LogCaptor;
 import org.eclipse.paho.mqttv5.client.IMqttToken;
 import org.eclipse.paho.mqttv5.client.MqttDisconnectResponse;
@@ -53,10 +51,8 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -86,8 +82,6 @@ class MqttMessageCallbackTest {
     private ObjectMapper mockObjectMapper;
     @Mock
     private AiidaPermissionRequestViewRepository permissionRequestViewRepository;
-    @Mock
-    private MqttEventPublisher eventPublisher;
 
     private ObjectMapper realObjectMapper;
 
@@ -99,23 +93,13 @@ class MqttMessageCallbackTest {
 
         // Message Processors
         var messageProcessorRegistry = new AiidaMessageProcessorRegistry(getAiidaMessageProcessors());
-        mqttMessageCallback = new MqttMessageCallback(messageProcessorRegistry, eventPublisher);
+        mqttMessageCallback = new MqttMessageCallback(messageProcessorRegistry);
     }
 
     @AfterEach
     void tearDown() {
         logCaptor.clearLogs();
         logCaptor.resetLogLevel();
-    }
-
-    @Test
-    void connectComplete_publishesMqttConnectedEvent() {
-        // When
-        mqttMessageCallback.connectComplete(true, "ssl://example.test:8883");
-
-        // Then
-        verify(eventPublisher).publishEvent(
-                argThat(event -> ((MqttConnectedEvent) event).getServerUri().equals("ssl://example.test:8883")));
     }
 
     @Test

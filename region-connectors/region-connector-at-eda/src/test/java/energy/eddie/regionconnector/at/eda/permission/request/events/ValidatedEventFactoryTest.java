@@ -3,65 +3,33 @@
 
 package energy.eddie.regionconnector.at.eda.permission.request.events;
 
-import energy.eddie.api.agnostic.data.needs.AccountingPointDataNeedResult;
-import energy.eddie.api.agnostic.data.needs.Timeframe;
-import energy.eddie.dataneeds.needs.AccountingPointDataNeed;
 import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
-import org.jspecify.annotations.Nullable;
+import energy.eddie.regionconnector.at.eda.requests.EdaGroupingIdFactory;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
+import java.time.Month;
 
-import static energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata.AT_ZONE_ID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ValidatedEventFactoryTest {
-    @Test
-    void createValidatedEvent_prefixesConversationId() {
-        var event = createValidatedEvent("TEST");
-
-        assertThat(event.conversationId()).startsWith("TESTEP123456T");
-    }
+    private static final LocalDate TODAY = LocalDate.of(2026, Month.SEPTEMBER, 1);
 
     @Test
-    void createValidatedEvent_filtersCharactersDisallowedInConversationIdPrefix() {
-        var event = createValidatedEvent("DEMO-");
+    void createValidatedEvent_prefixesEligiblePartyConversationId() {
+        var event = createValidatedEvent(
+                new AtConfiguration("EP123456", null, "DEV")
+        );
 
-        assertThat(event.conversationId()).startsWith("DEMOEP123456T");
+        assertThat(event.conversationId()).startsWith("DEVEP123456T");
     }
 
-    @Test
-    void createValidatedEvent_usesEligiblePartyIdWhenConversationIdPrefixHasNoValidCharacters() {
-        var event = createValidatedEvent("-_+#");
-
-        assertThat(event.conversationId()).startsWith("EP123456T");
-    }
-
-    @Test
-    void createValidatedEvent_usesEligiblePartyIdWhenConversationIdPrefixIsNotConfigured() {
-        var event = createValidatedEvent(null);
-
-        assertThat(event.conversationId()).startsWith("EP123456T");
-    }
-
-    @Test
-    void createValidatedEvent_usesEligiblePartyIdWhenConversationIdPrefixIsBlank() {
-        var event = createValidatedEvent(" ");
-
-        assertThat(event.conversationId()).startsWith("EP123456T");
-    }
-
-    private static ValidatedEvent createValidatedEvent(@Nullable String conversationIdPrefix) {
-        var configuration = new AtConfiguration("EP123456", null, null, conversationIdPrefix);
-        var factory = new ValidatedEventFactory(configuration);
-        var timeframe = new Timeframe(LocalDate.now(AT_ZONE_ID), LocalDate.now(AT_ZONE_ID));
-
-        return factory.createValidatedEvent(
+    private static ValidatedEvent createValidatedEvent(AtConfiguration configuration) {
+        return new ValidatedEventFactory(new EdaGroupingIdFactory(configuration)).createValidatedEvent(
                 "permission-id",
-                timeframe.start(),
-                timeframe.end(),
-                null,
-                new AccountingPointDataNeedResult(timeframe, new AccountingPointDataNeed())
+                TODAY,
+                TODAY,
+                null
         );
     }
 }

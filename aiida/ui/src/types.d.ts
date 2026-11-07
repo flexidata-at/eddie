@@ -26,6 +26,12 @@ export type AiidaDataNeed = {
 
 export type AiidaDataSourceIcon = 'ELECTRICITY' | 'HEAT' | 'METER' | 'WATER' | ''
 
+export type InboundProvisioningType =
+  | 'MQTT_SERVER'
+  | 'MQTT_CLIENT'
+  | 'REST_API_TOKEN'
+  | 'REST_BEARER'
+
 export type AiidaDataSource = {
   id: string
   type: string
@@ -37,8 +43,9 @@ export type AiidaDataSource = {
   meterId?: string
   operatorId?: string
   //DatasourceType = INBOUND
-  accessCode?: string
   schemas?: string[]
+  provisioningType?: InboundProvisioningType
+  mqttProvisioningConfig?: InboundProvisioningMqttConfig
   //DatasourceType = MQTT
   internalHost?: string
   externalHost?: string
@@ -62,27 +69,56 @@ export type AiidaPermission = {
   eddieId: string
   status: string
   serviceName: string
+  displayName: string
   startTime: string
   expirationTime: string
   grantTime?: string
   meterId?: string
+  minLimitKw?: number
+  maxLimitKw?: number
   dataNeed: AiidaDataNeed
   dataSource?: AiidaDataSource
   transmissionEnabled: boolean
   effectiveTransmissionSchedule?: string
   inboundMessageFormat?: InboundMessageFormat
   mqttStreamingConfig?: AiidaPermissionStreamingConfig
+  monitoringDataSourceId?: string
+  supportsConnectionLimits: boolean
   userId: string
   unimplemented: {
     packageGraph: any
     targetIP: any
-    lastPackageSent: any
   }
 }
 
 export type AiidaPermissionStreamingConfig = {
   dataTopic: string
   serverUri: string
+}
+
+export type LatestSchemaRecord = {
+  schema: string
+  sentAt: string
+  message: string
+}
+
+export type LatestOutboundPermissionRecord = {
+  permissionId: string
+  topic: string
+  serverUri: string
+  messages: LatestSchemaRecord[]
+}
+
+export type LatestInboundPermissionRecord = {
+  timestamp: string
+  dataSourceId: string
+  messageFormat: InboundMessageFormat
+  payload: string
+}
+
+export type LastMessageEvent = {
+  permissionId: string
+  timestamp: string
 }
 
 export type AiidaDataSourceType = {
@@ -92,6 +128,11 @@ export type AiidaDataSourceType = {
 
 export type AiidaApplicationInformation = {
   aiidaId: string
+}
+
+export type UserSettings = {
+  userId: string
+  contactEmail: string | null
 }
 
 export type AiidaPermissionRequestsDTO = {
@@ -106,6 +147,46 @@ export type AiidaDataSourceHealthStatus = {
   details?: {
     [key: string]: string
   }
+}
+
+export type MqttConnection = {
+  internalHost: string
+  externalHost: string
+  username: string
+}
+
+export type InboundProvisioningMqttConfig = {
+  connection: MqttConnection
+  topic: string
+}
+
+export type ProvisioningTypePatchDto =
+  | {
+      type: 'MQTT_CLIENT'
+      host: string
+      username: string
+      password: string
+      topic: string
+    }
+  | {
+      type: Exclude<InboundProvisioningType, 'MQTT_CLIENT'>
+    }
+
+export type ProvisioningConnectionDto = {
+  host: string
+  username: string
+  password: string
+  topic: string
+}
+
+export type ConnectionLimit = {
+  permissionId: string
+  meterId: string | null
+  documentId: string | null
+  intervalStart: string
+  intervalEnd: string
+  minLimitKw: number | null
+  maxLimitKw: number | null
 }
 
 export type PermissionTypes = 'Active' | 'Pending' | 'Complete'

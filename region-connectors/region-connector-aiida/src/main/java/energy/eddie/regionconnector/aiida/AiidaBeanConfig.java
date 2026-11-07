@@ -205,11 +205,8 @@ public class AiidaBeanConfig {
     }
 
     @Bean
-    public MqttMessageCallback mqttMessageCallback(
-            AiidaMessageProcessorRegistry messageProcessorRegistry,
-            MqttEventPublisher eventPublisher
-    ) {
-        return new MqttMessageCallback(messageProcessorRegistry, eventPublisher);
+    public MqttMessageCallback mqttMessageCallback(AiidaMessageProcessorRegistry messageProcessorRegistry) {
+        return new MqttMessageCallback(messageProcessorRegistry);
     }
 
     @Bean

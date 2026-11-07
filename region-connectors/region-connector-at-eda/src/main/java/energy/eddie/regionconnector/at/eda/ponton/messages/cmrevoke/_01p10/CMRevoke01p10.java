@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 The EDDIE Developers <eddie.developers@fh-hagenberg.at>
+// SPDX-FileCopyrightText: 2025-2026 The EDDIE Developers <eddie.developers@fh-hagenberg.at>
 // SPDX-License-Identifier: Apache-2.0
 
 package energy.eddie.regionconnector.at.eda.ponton.messages.cmrevoke._01p10;
@@ -12,13 +12,10 @@ import energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata;
 import energy.eddie.regionconnector.at.eda.models.MessageCodes;
 import energy.eddie.regionconnector.at.eda.requests.CCMOAddress;
 import energy.eddie.regionconnector.at.eda.requests.CCMORevoke;
-import energy.eddie.regionconnector.at.eda.requests.MessageId;
 import energy.eddie.regionconnector.at.eda.xml.helper.DateTimeConverter;
 import energy.eddie.regionconnector.at.eda.xml.helper.Sector;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZonedDateTime;
 
 public record CMRevoke01p10(CCMORevoke ccmoRevoke) {
     public static final String VERSION = "01.10";
@@ -49,19 +46,9 @@ public record CMRevoke01p10(CCMORevoke ccmoRevoke) {
                         new ProcessDirectory()
                                 .withMeteringPoint(permissionRequest.meteringPointId().orElse(null))
                                 .withConsentId(permissionRequest.consentId().orElse(null))
-                                .withMessageId(new MessageId(
-                                                       eligiblePartyId,
-                                                       ZonedDateTime.now(EdaRegionConnectorMetadata.AT_ZONE_ID)
-                                               ).toString()
-                                )
-                                .withConversationId(permissionRequest.conversationId())
-                                .withConsentEnd(
-                                        DateTimeConverter
-                                                .dateTimeToXml(
-                                                        LocalDate.now(EdaRegionConnectorMetadata.AT_ZONE_ID)
-                                                                 .atStartOfDay(EdaRegionConnectorMetadata.AT_ZONE_ID)
-                                                )
-                                )
+                                .withMessageId(ccmoRevoke.messageId())
+                                .withConversationId(ccmoRevoke.conversationId())
+                                .withConsentEnd(DateTimeConverter.dateTimeToXml(ccmoRevoke.consentEnd()))
                                 // For the eligible party the reason will always be other, see: https://www.ebutilities.at/documents/2025/09/CMRevoke_01p10_Schemadoku.pdf
                                 .withReasonKey(0)
                                 .withReason(ccmoRevoke.reason())

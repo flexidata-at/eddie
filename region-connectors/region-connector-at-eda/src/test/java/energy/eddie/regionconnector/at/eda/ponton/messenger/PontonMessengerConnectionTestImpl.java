@@ -10,8 +10,8 @@ import energy.eddie.regionconnector.at.eda.requests.CCMORequest;
 import energy.eddie.regionconnector.at.eda.requests.CCMORevoke;
 import energy.eddie.regionconnector.at.eda.requests.CPRequestCR;
 
-import java.time.ZonedDateTime;
 import java.time.Duration;
+import java.time.ZonedDateTime;
 import java.util.Map;
 
 public class PontonMessengerConnectionTestImpl implements PontonMessengerConnection {

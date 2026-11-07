@@ -96,6 +96,7 @@ public class PontonXPAdapter implements EdaAdapter {
         cpRequestResultSink.tryEmitComplete();
         if (connectionWatchdogTask != null) {
             connectionWatchdogTask.cancel(false);
+            connectionWatchdogTask = null;
         }
         pontonMessengerConnection.close();
     }
@@ -393,7 +394,7 @@ public class PontonXPAdapter implements EdaAdapter {
     }
 
     private void scheduleConnectionWatchdog() {
-        if (connectionWatchdogTask != null && !connectionWatchdogTask.isCancelled()) {
+        if (connectionWatchdogTask != null && !connectionWatchdogTask.isCancelled() && !connectionWatchdogTask.isDone()) {
             return;
         }
         connectionWatchdogTask = scheduler.scheduleAtFixedRate(

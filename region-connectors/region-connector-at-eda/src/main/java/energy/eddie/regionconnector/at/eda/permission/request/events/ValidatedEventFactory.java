@@ -3,11 +3,8 @@
 
 package energy.eddie.regionconnector.at.eda.permission.request.events;
 
-import energy.eddie.api.agnostic.data.needs.CESUJoinRequestDataNeedResult;
-import energy.eddie.api.agnostic.data.needs.DataNeedCalculationResult;
 import energy.eddie.api.agnostic.data.needs.EnergyDirection;
-import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
-import energy.eddie.regionconnector.at.eda.requests.MessageId;
+import energy.eddie.regionconnector.at.eda.requests.EdaGroupingIdFactory;
 import energy.eddie.regionconnector.at.eda.requests.restricted.enums.AllowedGranularity;
 import energy.eddie.regionconnector.at.eda.utils.CMRequestId;
 import jakarta.annotation.Nullable;
@@ -20,19 +17,19 @@ import static energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata.AT_
 
 @Component
 public class ValidatedEventFactory {
-    private final AtConfiguration configuration;
+    private final EdaGroupingIdFactory groupingIdFactory;
 
-    public ValidatedEventFactory(AtConfiguration configuration) {this.configuration = configuration;}
-
+    public ValidatedEventFactory(EdaGroupingIdFactory groupingIdFactory) {
+        this.groupingIdFactory = groupingIdFactory;
+    }
 
     public ValidatedEvent createValidatedEvent(
             String permissionId,
             LocalDate start,
             @Nullable LocalDate end,
-            @Nullable AllowedGranularity granularity,
-            DataNeedCalculationResult dataNeedCalculation
+            @Nullable AllowedGranularity granularity
     ) {
-        return createValidatedEvent(permissionId, start, end, granularity, dataNeedCalculation, null, null);
+        return createValidatedEvent(permissionId, start, end, granularity, null, null);
     }
 
     public ValidatedEvent createValidatedEvent(
@@ -40,15 +37,11 @@ public class ValidatedEventFactory {
             LocalDate start,
             @Nullable LocalDate end,
             @Nullable AllowedGranularity granularity,
-            DataNeedCalculationResult dataNeedCalculation,
             @Nullable EnergyDirection energyDirection,
             @Nullable Integer participationFactor
     ) {
         ZonedDateTime created = ZonedDateTime.now(AT_ZONE_ID);
-        var type = dataNeedCalculation instanceof CESUJoinRequestDataNeedResult
-                ? AtConfiguration.PartyIdType.ENERGY_COMMUNITY
-                : AtConfiguration.PartyIdType.ELIGIBLE_PARTY;
-        var messageId = new MessageId(configuration.conversationIdPartyIdFor(type), created).toString();
+        var messageId = groupingIdFactory.create(created);
         var cmRequestId = new CMRequestId(messageId).toString();
 
         return new ValidatedEvent(

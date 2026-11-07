@@ -1,6 +1,7 @@
-// SPDX-FileCopyrightText: 2025 The EDDIE Developers <eddie.developers@fh-hagenberg.at>
+// SPDX-FileCopyrightText: 2025-2026 The EDDIE Developers <eddie.developers@fh-hagenberg.at>
 // SPDX-License-Identifier: Apache-2.0
 
+import { fetchEventSource } from '@microsoft/fetch-event-source'
 import useToast from './composables/useToast'
 import { keycloak } from './keycloak'
 import type {
@@ -10,7 +11,14 @@ import type {
   AiidaDataSourceType,
   AiidaPermission,
   AiidaPermissionRequestsDTO,
+  ConnectionLimit,
   InboundMessageFormat,
+  LastMessageEvent,
+  LatestInboundPermissionRecord,
+  LatestOutboundPermissionRecord,
+  ProvisioningConnectionDto,
+  ProvisioningTypePatchDto,
+  UserSettings,
 } from './types'
 
 const { danger, success } = useToast()
@@ -25,7 +33,11 @@ const FALLBACK_ERROR_MESSAGES = {
   500: 'Something went wrong. Please try again.',
 }
 
-async function fetch(path: string, init?: RequestInit): Promise<any> {
+async function fetch(
+  path: string,
+  init?: RequestInit,
+  options?: { silentStatuses?: number[] },
+): Promise<any> {
   try {
     await keycloak.updateToken(5)
   } catch (error) {
@@ -55,7 +67,10 @@ async function fetch(path: string, init?: RequestInit): Promise<any> {
       (await parseErrorResponse(response)) ??
       FALLBACK_ERROR_MESSAGES[response.status as keyof typeof FALLBACK_ERROR_MESSAGES] ??
       'errors.unexpectedError'
-    if (!(isImagesEndpoint && response.status == 404)) {
+    if (
+      !(isImagesEndpoint && response.status == 404) &&
+      !options?.silentStatuses?.includes(response.status)
+    ) {
       danger(message, response.status == 404 ? 5000 : 0, true)
     }
     throw new Error(message)
@@ -101,12 +116,21 @@ export function getPermissions(): Promise<AiidaPermission[]> {
   return fetch('/permissions')
 }
 
+export function getConnectionLimits(
+  permissionId: string,
+  from: string,
+  to: string,
+): Promise<ConnectionLimit[]> {
+  return fetch(`/connection-limits?${new URLSearchParams({ permissionId, from, to })}`)
+}
+
 export function getActiveInboundPermissions(): Promise<AiidaPermission[]> {
   return fetch('/permissions/inbound/active')
 }
 
-export function getDataSources(): Promise<AiidaDataSource[]> {
-  return fetch('/datasources/outbound')
+export function getDataSources(meterId?: string): Promise<AiidaDataSource[]> {
+  const query = meterId ? `?${new URLSearchParams({ meterId })}` : ''
+  return fetch(`/datasources/outbound${query}`)
 }
 
 export function getDataSourceTypes(): Promise<AiidaDataSourceType[]> {
@@ -145,6 +169,19 @@ export function getApplicationInformation(): Promise<AiidaApplicationInformation
   return fetch('/application-information')
 }
 
+export function getUserSettings(): Promise<UserSettings> {
+  return fetch('/user-settings')
+}
+
+export async function updateUserSettings(contactEmail: string | null): Promise<UserSettings> {
+  const result: UserSettings = await fetch('/user-settings', {
+    method: 'PUT',
+    body: JSON.stringify({ contactEmail }),
+  })
+  success('toasts.updateUserSettings')
+  return result
+}
+
 export function addPermissions(
   permissionRequests: AiidaPermissionRequestsDTO,
 ): Promise<AiidaPermission[]> {
@@ -165,12 +202,17 @@ export async function rejectPermission(permissionId: string): Promise<any> {
   return result
 }
 
-export async function acceptPermission(permissionId: string, dataSourceId: string): Promise<void> {
+export async function acceptPermission(
+  permissionId: string,
+  dataSourceId: string,
+  displayName?: string,
+): Promise<void> {
   await fetch(`/permissions/${permissionId}`, {
     method: 'PATCH',
     body: JSON.stringify({
       operation: 'ACCEPT',
       dataSourceId,
+      displayName,
     }),
   })
   success('toasts.acceptPermission')
@@ -198,6 +240,32 @@ export async function updateInboundMessageFormat(
     }),
   })
   success('toasts.updateInboundMessageFormat')
+}
+
+export async function updateDisplayName(permissionId: string, displayName: string): Promise<void> {
+  await fetch(`/permissions/${permissionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      operation: 'UPDATE_DISPLAY_NAME',
+      displayName,
+    }),
+  })
+  success('toasts.updateDisplayName')
+}
+
+export async function updateConnectionLimitMonitoring(permissionId: string, dataSourceId: string) {
+  await fetch(`/connection-limit-monitoring/${permissionId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ dataSourceId }),
+  })
+  success('toasts.updateConnectionLimitMonitoring')
+}
+
+export async function deleteConnectionLimitMonitoring(permissionId: string): Promise<void> {
+  await fetch(`/connection-limit-monitoring/${permissionId}`, {
+    method: 'DELETE',
+  })
+  success('toasts.updateConnectionLimitMonitoring')
 }
 
 export async function addDataSource(dataSource: Omit<AiidaDataSource, 'id'>): Promise<{
@@ -270,20 +338,78 @@ export async function getLatestDataSourceMessage(id: string) {
   })
 }
 
-export async function getLatestOutboundPermissionMessage(id: string) {
-  return fetch(`/messages/permission/${id}/outbound/latest`, {
-    method: 'GET',
-  })
+export async function getLatestOutboundPermissionMessage(
+  id: string,
+  silentNotFound = false,
+): Promise<LatestOutboundPermissionRecord> {
+  return fetch(
+    `/messages/permission/${id}/outbound/latest`,
+    { method: 'GET' },
+    silentNotFound ? { silentStatuses: [404] } : undefined,
+  )
 }
 
-export async function getLatestInboundPermissionMessage(id: string) {
-  return fetch(`/messages/permission/${id}/inbound/latest`, {
-    method: 'GET',
+export async function getLatestInboundPermissionMessage(
+  id: string,
+  silentNotFound = false,
+): Promise<LatestInboundPermissionRecord> {
+  return fetch(
+    `/messages/permission/${id}/inbound/latest`,
+    { method: 'GET' },
+    silentNotFound ? { silentStatuses: [404] } : undefined,
+  )
+}
+
+export function subscribeToLastMessageStream(
+  onMessage: (event: LastMessageEvent) => void,
+  signal: AbortSignal,
+): void {
+  void fetchEventSource(`${BASE_URL}/messages/last-message-stream`, {
+    signal,
+    headers: { accept: 'text/event-stream, application/json' },
+    fetch: async (input, init) => {
+      await keycloak.updateToken(5)
+      return globalThis.fetch(input, {
+        ...init,
+        headers: { ...init?.headers, Authorization: `Bearer ${keycloak.token}` },
+      })
+    },
+    onmessage: (event) => onMessage(JSON.parse(event.data) as LastMessageEvent),
   })
 }
 
 export async function getTlsCertificateFile() {
   return fetch('/mqtt/download/tls-certificate', {
     method: 'GET',
+  })
+}
+
+export async function patchInboundProvisioning(
+  permissionId: string,
+  payload: ProvisioningTypePatchDto,
+): Promise<ProvisioningConnectionDto> {
+  return fetch(`/provisioning/permission/${permissionId}/patchInboundProvisioning`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getInboundProvisioningTypes(): Promise<{ provisioningTypes: string[] }> {
+  return fetch('/provisioning/types', {
+    method: 'GET',
+  })
+}
+
+export function regenerateInboundServerPassword(
+  permissionId: string,
+): Promise<ProvisioningConnectionDto> {
+  return fetch(`/provisioning/permission/${permissionId}/regenerate-server-provisioning-password`, {
+    method: 'POST',
+  })
+}
+
+export function regenerateInboundRestApiKey(permissionId: string): Promise<{ apiKey: string }> {
+  return fetch(`/provisioning/permission/${permissionId}/regenerate-rest-api-key`, {
+    method: 'POST',
   })
 }

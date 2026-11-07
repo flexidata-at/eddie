@@ -3,16 +3,17 @@
 
 package energy.eddie.regionconnector.at.eda.ponton.messenger;
 
+import energy.eddie.regionconnector.at.eda.ponton.PontonXPAdapterConfiguration;
 import jakarta.annotation.Nullable;
 
-import java.time.Duration;
+import java.time.Clock;
 import java.time.Instant;
 
 /**
  * Tracks the local adapter-side WebSocket connection state reported by the PONTON X/P Adapter API.
  * <p>
  * The PONTON REST health endpoint only says whether the Messenger process is reachable. It does not prove that this
- * adapter still has usable WebSocket connections for inbound and outbound processing. PONTON X/P Messenger 5.2 exposes
+ * adapter still has usable WebSocket connections for inbound and outbound processing. The PONTON X/P Adapter API exposes
  * {@code onConnectionStatusChanged}, which reports the active WebSocket connection counts for each processing direction.
  * This class stores those callback values and turns them into a reconnect decision.
  * <p>
@@ -20,9 +21,10 @@ import java.time.Instant;
  * within the configured timeout, or one of the observed connection counts is below the configured expected count.
  */
 final class PontonWebSocketConnectionState {
-    private boolean receptionStarted;
+    private final PontonXPAdapterConfiguration config;
+    private final Clock clock;
     @Nullable
-    private Instant lastStartAt;
+    private Instant lastReceptionStartAt;
     @Nullable
     private Instant lastRestartAt;
     @Nullable
@@ -31,30 +33,33 @@ final class PontonWebSocketConnectionState {
     private Instant lastAdapterStatusRequestAt;
     private int outboundConnectionCount;
     private int inboundConnectionCount;
-    private int archiveConnectionCount;
+
+    PontonWebSocketConnectionState(PontonXPAdapterConfiguration config, Clock clock) {
+        this.config = config;
+        this.clock = clock;
+    }
 
     /**
      * Marks that {@code startReception()} was called and the adapter now expects connection-status callbacks.
      */
-    synchronized void markReceptionStarted(Instant now) {
-        receptionStarted = true;
-        lastStartAt = now;
+    synchronized void markReceptionStarted() {
+        lastReceptionStartAt = clock.instant();
     }
 
     /**
      * Resets the observed connection counts after rebuilding the Messenger connection.
      */
-    synchronized void markRestarted(Instant now) {
+    synchronized void markRestarted() {
+        var now = clock.instant();
         lastRestartAt = now;
-        lastStartAt = now;
+        lastReceptionStartAt = now;
         lastConnectionStatusChangedAt = null;
         outboundConnectionCount = 0;
         inboundConnectionCount = 0;
-        archiveConnectionCount = 0;
     }
 
-    synchronized void markAdapterStatusRequested(Instant now) {
-        lastAdapterStatusRequestAt = now;
+    synchronized void markAdapterStatusRequested() {
+        lastAdapterStatusRequestAt = clock.instant();
     }
 
     /**
@@ -62,59 +67,36 @@ final class PontonWebSocketConnectionState {
      */
     synchronized void updateConnectionCounts(
             int outboundConnectionCount,
-            int inboundConnectionCount,
-            int archiveConnectionCount,
-            Instant now
+            int inboundConnectionCount
     ) {
         this.outboundConnectionCount = outboundConnectionCount;
         this.inboundConnectionCount = inboundConnectionCount;
-        this.archiveConnectionCount = archiveConnectionCount;
-        lastConnectionStatusChangedAt = now;
+        lastConnectionStatusChangedAt = clock.instant();
     }
 
-    synchronized boolean needsReconnect(
-            int expectedOutboundConnections,
-            int expectedInboundConnections,
-            int expectedArchiveConnections,
-            Duration connectionStatusTimeout,
-            Instant now
-    ) {
-        if (!receptionStarted) {
+    synchronized boolean needsReconnect() {
+        if (lastReceptionStartAt == null) {
             return false;
         }
         if (lastConnectionStatusChangedAt == null) {
-            return lastStartAt != null && lastStartAt.plus(connectionStatusTimeout).isBefore(now);
+            return lastReceptionStartAt.plus(config.connectionStatusTimeout()).isBefore(clock.instant());
         }
-        return outboundConnectionCount < expectedOutboundConnections ||
-               inboundConnectionCount < expectedInboundConnections ||
-               archiveConnectionCount < expectedArchiveConnections;
+        return outboundConnectionCount < config.outboundConnections() ||
+               inboundConnectionCount < config.inboundConnections();
     }
 
-    synchronized HealthCheck healthCheck(
-            int expectedOutboundConnections,
-            int expectedInboundConnections,
-            int expectedArchiveConnections,
-            Duration connectionStatusTimeout,
-            Instant now
-    ) {
-        var ok = !needsReconnect(
-                expectedOutboundConnections,
-                expectedInboundConnections,
-                expectedArchiveConnections,
-                connectionStatusTimeout,
-                now
-        );
+    synchronized HealthCheck healthCheck() {
+        var ok = !needsReconnect();
         return new HealthCheck("adapterWebSocketConnection", ok, describe());
     }
 
     synchronized String describe() {
-        return "started=%s, outbound=%d, inbound=%d, archive=%d, lastStartAt=%s, lastRestartAt=%s, lastConnectionStatusChangedAt=%s, lastAdapterStatusRequestAt=%s"
+        return "started=%s, outbound=%d, inbound=%d, lastReceptionStartAt=%s, lastRestartAt=%s, lastConnectionStatusChangedAt=%s, lastAdapterStatusRequestAt=%s"
                 .formatted(
-                        receptionStarted,
+                        lastReceptionStartAt != null,
                         outboundConnectionCount,
                         inboundConnectionCount,
-                        archiveConnectionCount,
-                        lastStartAt,
+                        lastReceptionStartAt,
                         lastRestartAt,
                         lastConnectionStatusChangedAt,
                         lastAdapterStatusRequestAt

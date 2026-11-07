@@ -17,7 +17,6 @@ public class MessageCodes {
     public static class Revoke {
         public static final String CUSTOMER = "AUFHEBUNG_CCMC";
         public static final String IMPLICIT = "AUFHEBUNG_CCMI";
-        public static final String VERSION = "01.00";
 
         private Revoke() {
         }
@@ -67,18 +66,22 @@ public class MessageCodes {
     /**
      * Requests for Energy communities.
      *
-     * @see <a href="https://www.ebutilities.at/prozesse/592">EC_REQ_ONL</a>
+     * @see <a href="https://www.ebutilities.at/prozesse/711">EC_REQ_ONL</a>
      */
     public static class EcRequest {
         public static final String CODE = "ANFORDERUNG_ECON";
-        public static final String SCHEMA = "EC_REQ_ONL_02.10";
-        public static final String VERSION = "02.10";
+        public static final String SCHEMA = "EC_REQ_ONL_02.40";
+        public static final String VERSION = "02.40";
+        public static final String SCHEMA_LEGACY = "EC_REQ_ONL_02.30";
+        public static final String VERSION_LEGACY = "02.30";
 
         private EcRequest() {}
     }
 
     public static class CPRequest {
         public static final String CODE = "ANFORDERUNG_PT";
+        public static final String SCHEMA = "CR_REQ_PT_03.00";
+        public static final String VERSION = "03.00";
 
         private CPRequest() {
         }

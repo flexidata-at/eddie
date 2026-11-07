@@ -46,8 +46,13 @@ class CMRevoke01p10OutboundMessageFactoryTest {
                 PermissionProcessStatus.ACCEPTED,
                 Optional.of("TestConsentId")
         );
-        String eligiblePartyId = "TestEligiblePartyId";
-        CCMORevoke ccmoRevoke = new CCMORevoke(permissionRequest, eligiblePartyId, "TestReason");
+        CCMORevoke ccmoRevoke = new CCMORevoke(
+                permissionRequest,
+                "EP123456",
+                "messageId",
+                "TestReason",
+                "convID"
+        );
 
         // when
         var message = new CMRevoke01p10OutboundMessageFactory(marshaller).createOutboundMessage(ccmoRevoke);
@@ -57,7 +62,7 @@ class CMRevoke01p10OutboundMessageFactoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"2026-04-13", "2026-04-14", "2027-04-09", "2028-04-10"})
+    @ValueSource(strings = {"2026-10-05", "2026-10-06", "2027-04-09", "2028-04-10"})
     void isActive_afterStartDate_ReturnsTrue(LocalDate date) {
         // given
         var factory = new CMRevoke01p10OutboundMessageFactory(marshaller);
@@ -70,7 +75,7 @@ class CMRevoke01p10OutboundMessageFactoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"2026-04-12"})
+    @ValueSource(strings = {"2026-04-12", "2026-10-04"})
     void isActive_whenInactive_ReturnsFalse(LocalDate date) {
         // given
         var factory = new CMRevoke01p10OutboundMessageFactory(marshaller);

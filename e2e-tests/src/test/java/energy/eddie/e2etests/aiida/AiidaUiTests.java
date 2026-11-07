@@ -9,25 +9,36 @@ import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.junit.UsePlaywright;
 import com.microsoft.playwright.options.AriaRole;
+import com.microsoft.playwright.options.FormData;
 import com.microsoft.playwright.options.RequestOptions;
+import energy.eddie.cim.agnostic.PermissionCommand;
 import energy.eddie.e2etests.PlaywrightOptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.Map;
+import java.util.UUID;
 
 import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
 import static energy.eddie.e2etests.PlaywrightOptions.*;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static java.util.Objects.requireNonNull;
+import static org.junit.jupiter.api.Assertions.*;
 
 @UsePlaywright(PlaywrightOptions.class)
 class AiidaUiTests {
     Page page;
     BrowserContext context;
+    ObjectMapper mapper = new ObjectMapper();
 
     @BeforeEach
     void setup(Page page, BrowserContext context) {
@@ -106,18 +117,17 @@ class AiidaUiTests {
 
     @Test
     void inboundMessageForwardingFlow(APIRequestContext request) throws IOException {
-        var mapper = new ObjectMapper();
-
         var inboundDataNeed = "FUTURE_MIN_MAX_ENVELOPE_INBOUND";
         var inboundDataNeedId = "f7698978-b9fe-40c8-aebe-c997f7f58f2f";
+        var inboundPermissionDisplayName = "Control signal for my living room";
         var outboundDataNeed = "Forward inbound opaque and min-max envelopes";
         var outboundDataNeedId = "5de2a77d-1dd4-458d-b700-a84884dd04c6";
 
         var inboundAiidaCode = aiidaCodeForDataNeed(inboundDataNeed);
-        var inboundPermissionId = acceptInboundPermissionRequest(inboundAiidaCode);
+        var inboundPermissionId = acceptInboundPermissionRequest(inboundAiidaCode, inboundPermissionDisplayName);
 
         var outboundAiidaCode = aiidaCodeForDataNeed(outboundDataNeed);
-        var outboundPermissionId = acceptOutboundPermissionRequest(outboundAiidaCode, inboundPermissionId);
+        var outboundPermissionId = acceptOutboundPermissionRequest(outboundAiidaCode, inboundPermissionDisplayName);
 
         // Wait for connector to start
         page.waitForTimeout(1000);
@@ -151,7 +161,7 @@ class AiidaUiTests {
         assertEquals(outboundDataNeedId, message.path("dataNeedId").asString());
 
         // Try revoke inbound while blocked
-        revokeInboundPermission(inboundDataNeed);
+        revokeInboundPermission(inboundPermissionDisplayName);
         expectAlert("Cannot revoke inbound permission %s because it is still used by outbound permissions: %s"
                             .formatted(inboundPermissionId, outboundPermissionId));
         // Revoke outbound
@@ -159,55 +169,297 @@ class AiidaUiTests {
         expectAlert("The permission for this service was revoked.");
 
         // Revoke inbound
-        revokeInboundPermission(inboundDataNeed);
+        revokeInboundPermission(inboundPermissionDisplayName);
         expectAlert("The permission for this service was revoked.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"REST_BEARER", "REST_API_TOKEN"})
+    void rotatedRestApiKeyShownInUiIsTheCredentialUsedByApi(
+            String provisioningType,
+            APIRequestContext request
+    ) throws IOException {
+        var dataNeed = "FUTURE_MIN_MAX_ENVELOPE_INBOUND";
+        var dataNeedId = "f7698978-b9fe-40c8-aebe-c997f7f58f2f";
+        var displayName = "E2E REST API Key Permission";
+        var permissionId = acceptInboundPermissionRequest(aiidaCodeForDataNeed(dataNeed), displayName);
+        selectPermission(displayName, PermissionTab.INBOUND, PermissionStatus.ACTIVE);
+        var authorization = "Bearer " + fetchAccessToken();
+
+        var configureResponse = context.request().patch(
+                AIIDA_URL + "/provisioning/permission/" + permissionId + "/patchInboundProvisioning",
+                RequestOptions.create()
+                              .setHeader("Authorization", authorization)
+                              .setHeader("content-type", "application/json")
+                              .setData(Map.of("type", provisioningType))
+        );
+        assertThat(configureResponse).isOK();
+
+        var firstRotationResponse = context.request().post(
+                AIIDA_URL + "/provisioning/permission/" + permissionId + "/regenerate-rest-api-key",
+                RequestOptions.create().setHeader("Authorization", authorization)
+        );
+        assertThat(firstRotationResponse).isOK();
+        var previousApiKey = mapper.readTree(firstRotationResponse.text()).path("apiKey").asString();
+
+        var permissionsResponse = context.request().get(
+                AIIDA_URL + "/permissions",
+                RequestOptions.create().setHeader("Authorization", authorization)
+        );
+        assertThat(permissionsResponse).isOK();
+        assertFalse(permissionsResponse.text().contains("\"accessCode\""));
+        assertFalse(permissionsResponse.text().contains("api_key_"));
+
+        page.reload();
+        var permission = selectPermission(displayName, PermissionTab.INBOUND, PermissionStatus.ACTIVE);
+        permission.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Rotate API key")).click();
+
+        var rotationResponse = page.waitForResponse(
+                response -> response.url().endsWith("/regenerate-rest-api-key"),
+                () -> page.getByRole(AriaRole.DIALOG)
+                          .getByRole(AriaRole.BUTTON,
+                                     new Locator.GetByRoleOptions().setName("Rotate API key").setExact(true))
+                          .click()
+        );
+        var currentApiKey = mapper.readTree(rotationResponse.text()).path("apiKey").asString();
+
+        assertFalse(currentApiKey.isBlank());
+        assertNotEquals(previousApiKey, currentApiKey);
+        assertEquals(currentApiKey, page.getByLabel("API key", new Page.GetByLabelOptions().setExact(true)).inputValue());
+        var endpoint = AIIDA_URL + "/inbound/latest/" + permissionId;
+        var expectedRequest = provisioningType.equals("REST_API_TOKEN")
+                ? "curl '" + endpoint + "?apiKey=" + currentApiKey + "'"
+                : "curl '" + endpoint + "' --header 'X-API-Key: " + currentApiKey + "'";
+        assertThat(page.getByRole(AriaRole.TEXTBOX,
+                                  new Page.GetByRoleOptions().setName("Request example").setExact(true)))
+                .hasValue(expectedRequest);
+
+        var now = Instant.now();
+        var inboundResponse = request.post(
+                REST_URL + "/cim_1_12/min-max-envelope-md",
+                RequestOptions.create()
+                              .setHeader("content-type", "application/json")
+                              .setData(minMaxEnvelope(permissionId,
+                                                      dataNeedId,
+                                                      "e2e-rest-api-key-meter",
+                                                      UUID.randomUUID().toString(),
+                                                      now,
+                                                      now,
+                                                      now.plusSeconds(3600),
+                                                      1,
+                                                      10))
+        );
+        assertThat(inboundResponse).isOK();
+
+        var previousKeyRequest = RequestOptions.create();
+        var previousKeyUrl = endpoint;
+        if (provisioningType.equals("REST_API_TOKEN")) {
+            previousKeyUrl += "?apiKey=" + previousApiKey;
+        } else {
+            previousKeyRequest.setHeader("X-API-Key", previousApiKey);
+        }
+        var previousKeyResponse = context.request().get(previousKeyUrl, previousKeyRequest);
+        assertEquals(401, previousKeyResponse.status());
+
+        var currentKeyStatus = 404;
+        for (var attempt = 0; attempt < 20 && currentKeyStatus == 404; attempt++) {
+            var currentKeyRequest = RequestOptions.create();
+            var currentKeyUrl = endpoint;
+            if (provisioningType.equals("REST_API_TOKEN")) {
+                currentKeyUrl += "?apiKey=" + currentApiKey;
+            } else {
+                currentKeyRequest.setHeader("X-API-Key", currentApiKey);
+            }
+            var currentKeyResponse = context.request().get(currentKeyUrl, currentKeyRequest);
+            currentKeyStatus = currentKeyResponse.status();
+            if (currentKeyStatus == 404) {
+                page.waitForTimeout(500);
+            }
+        }
+        assertEquals(200, currentKeyStatus);
+
+        page.getByRole(AriaRole.DIALOG)
+            .getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("I have saved the API key"))
+            .click();
+        revokePermission(permission);
+    }
+
+    @Test
+    void connectionLimitFlow(APIRequestContext request) throws IOException {
+        var dataNeed = "FUTURE_MIN_MAX_ENVELOPE_INBOUND";
+        var meterId = "e2e-limit-meter";
+        var dataNeedId = "f7698978-b9fe-40c8-aebe-c997f7f58f2f";
+        var displayName = "E2E Limit Permission";
+        var defaultMin = 10;
+        var defaultMax = 20;
+        var updatedDefaultMin = 1;
+        var updatedDefaultMax = 10;
+        var documentMin = 3;
+        var documentMax = 8;
+        var documentId = UUID.randomUUID().toString();
+        var now = Instant.now();
+        var documentIntervalStart = now.minusSeconds(60);
+        var documentIntervalEnd = documentIntervalStart.plusSeconds(86_400);
+        var queryStart = documentIntervalStart.minusSeconds(3600);
+        var queryEnd = documentIntervalEnd.plusSeconds(3600);
+
+        // Create permission with limit defaults
+        var aiidaCode = aiidaCodeForDataNeed(dataNeed, meterId, defaultMin, defaultMax);
+        var permissionId = acceptInboundPermissionRequest(aiidaCode, displayName);
+
+        // Successful inbound permission shows meter ID and limit defaults
+        var permission = selectPermission(displayName, PermissionTab.INBOUND, PermissionStatus.ACTIVE);
+        // String concat with '+' for readability where the DOM would show the text content without a whitespace
+        assertThat(permission).containsText("Meter ID" + meterId);
+        assertThat(permission).containsText("Minimum load" + "%d kW".formatted(defaultMin));
+        assertThat(permission).containsText("Maximum load" + "%d kW".formatted(defaultMax));
+
+        // Initial default limits are returned by the effective connection limit API
+        var initialLimits = getConnectionLimits(permissionId, queryStart, queryEnd);
+        var initialLimitsJson = mapper.readTree(initialLimits);
+        assertTrue(containsConnectionLimit(initialLimitsJson, null, defaultMin, defaultMax));
+
+        // Send command to update limit defaults
+        var limitCommand = new PermissionCommand.UpdateLimitDefaults("aiida",
+                                                                     UUID.fromString(permissionId),
+                                                                     BigDecimal.valueOf(updatedDefaultMin),
+                                                                     BigDecimal.valueOf(updatedDefaultMax));
+        var commandResponse = request.post(REST_URL + "/agnostic/permission-command",
+                                           RequestOptions.create()
+                                                         .setHeader("content-type", "application/json")
+                                                         .setData(mapper.writeValueAsString(limitCommand)));
+        assertThat(commandResponse).isOK();
+
+        // Effective limits should include historic and updated limits
+        waitForConnectionLimits(permissionId, queryStart, queryEnd, null, updatedDefaultMin, updatedDefaultMax, mapper);
+
+        page.reload();
+        permission = selectPermission(displayName, PermissionTab.INBOUND, PermissionStatus.ACTIVE);
+        assertThat(permission).containsText("Minimum load" + "%d kW".formatted(updatedDefaultMin));
+        assertThat(permission).containsText("Maximum load" + "%d kW".formatted(updatedDefaultMax));
+
+        // Send min-max envelope
+        var minMaxResponse = request.post(REST_URL + "/cim_1_12/min-max-envelope-md",
+                                          RequestOptions.create()
+                                                        .setHeader("content-type", "application/json")
+                                                        .setData(minMaxEnvelope(permissionId,
+                                                                                dataNeedId,
+                                                                                meterId,
+                                                                                documentId,
+                                                                                now,
+                                                                                documentIntervalStart,
+                                                                                documentIntervalEnd,
+                                                                                documentMin,
+                                                                                documentMax)));
+        assertThat(minMaxResponse).isOK();
+
+        var effectiveLimits = waitForConnectionLimits(permissionId,
+                                                      queryStart,
+                                                      queryEnd,
+                                                      documentId,
+                                                      documentMin,
+                                                      documentMax,
+                                                      mapper);
+        var effectiveLimitsJson = mapper.readTree(effectiveLimits);
+        assertTrue(containsConnectionLimit(effectiveLimitsJson, null, updatedDefaultMin, updatedDefaultMax));
+        assertTrue(containsConnectionLimit(effectiveLimitsJson, documentId, documentMin, documentMax));
+
+        var email = "e2e-limit@example.org";
+        var dataSource = "E2E Limit Data Source";
+
+        // Clear mailbox
+        assertThat(context.request().delete(MAILPIT_URL + "/api/v1/messages")).isOK();
+        createSimulationDataSource(dataSource, meterId, 5);
+
+        // Set contact email
+        page.getByRole(AriaRole.LINK, new Page.GetByRoleOptions().setName("Account")).click();
+        page.getByPlaceholder("you@example.com").fill(email);
+        page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Save")).click();
+
+        permission = selectPermission(displayName, PermissionTab.INBOUND, PermissionStatus.ACTIVE);
+        var monitoringSelect = permission.getByRole(AriaRole.LISTBOX)
+                                         .filter(new Locator.FilterOptions().setHasText("No data source"));
+        monitoringSelect.click();
+        permission.getByRole(AriaRole.OPTION).getByText(dataSource).click();
+        assertThat(permission.getByRole(AriaRole.LISTBOX)
+                             .filter(new Locator.FilterOptions().setHasText(dataSource))).isVisible();
+
+        var violationMessage = expectMail(email, "Connection limits exceeded");
+        assertTrue(violationMessage.contains("3"), violationMessage);
+
+        // Resolve the violation by providing a new limit
+        var recoveryResponse = request.post(REST_URL + "/cim_1_12/min-max-envelope-md",
+                                            RequestOptions.create()
+                                                          .setHeader("content-type", "application/json")
+                                                          .setData(minMaxEnvelope(permissionId,
+                                                                                  dataNeedId,
+                                                                                  meterId,
+                                                                                  UUID.randomUUID().toString(),
+                                                                                  Instant.now(),
+                                                                                  documentIntervalStart,
+                                                                                  documentIntervalEnd,
+                                                                                  -10,
+                                                                                  10)));
+        assertThat(recoveryResponse).isOK();
+        expectMail(email, "Connection limits restored");
+
+        revokeInboundPermission(displayName);
+        deleteDataSource(dataSource);
     }
 
     @Test
     void fcaPermissionFlow() {
         var dataSource = "E2E FCA Data Source";
-        var fcaOutboundDataNeed = "FCA Outbound";
-        var meterId = "e2e-meter";
+        var otherDataSource = "E2E FCA Other Data Source";
+        var inboundDataNeed = "FCA Inbound";
+        var outboundDataNeed = "FCA Outbound";
+        var meterId = "e2e-fca-meter";
+        var otherMeterId = "e2e-other-meter";
 
-        // Create a data source to use for the FCA permission
-        page.getByRole(AriaRole.LINK).getByText("Data Sources").click();
-        page.getByRole(AriaRole.BUTTON).getByText("Add Data Source").click();
-        page.getByLabel("Name").fill(dataSource);
-        page.getByRole(AriaRole.LISTBOX).getByText("Asset Type").click();
-        page.getByRole(AriaRole.OPTION).getByText("CONNECTION-AGREEMENT-POINT").click();
-        page.getByRole(AriaRole.LISTBOX).getByText("Data Source Type").click();
-        page.getByRole(AriaRole.OPTION).getByText("Simulation").click();
-        page.getByRole(AriaRole.LISTBOX).getByText("Country").click();
-        page.getByRole(AriaRole.OPTION).getByText("Austria").click();
-        page.getByLabel("Polling Interval").fill("120");
-        page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Meter")).click();
-        page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Add").setExact(true)).click();
+        // Create inbound permission sending min-max envelopes
+        var inboundAiidaCode = aiidaCodeForDataNeed(inboundDataNeed, meterId);
+        var inboundPermissionId = acceptInboundPermissionRequest(inboundAiidaCode, inboundDataNeed);
 
-        // Accept an FCA outbound permission tied to the meter ID
-        var aiidaCode = aiidaCodeForDataNeedWithMeterId(fcaOutboundDataNeed, meterId);
-        var permissionId = acceptOutboundPermissionRequest(aiidaCode, dataSource);
+        // Successful inbound permission shows FCA badge and meter ID
+        var inboundPermission = selectPermission(inboundDataNeed, PermissionTab.INBOUND, PermissionStatus.ACTIVE);
+        assertThat(inboundPermission).containsText(inboundPermissionId);
+        assertThat(inboundPermission).containsText("FCA");
+        assertThat(inboundPermission).containsText(meterId);
 
-        // Attempting a second FCA outbound permission for the same meter ID must fail
-        var duplicateAiidaCode = aiidaCodeForDataNeedWithMeterId(fcaOutboundDataNeed, meterId);
+        // Attempting a second FCA inbound permission for the same meter ID must fail
+        var duplicateAiidaCode = aiidaCodeForDataNeed(inboundDataNeed, meterId);
         addPermission(duplicateAiidaCode);
-        var expectedError = "active outbound FCA permission for meter ID '%s'".formatted(meterId);
+        var expectedError = "active inbound FCA permission for meter ID '%s'".formatted(meterId);
         assertThat(page.getByRole(AriaRole.DIALOG)).containsText(expectedError);
         page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Cancel").setExact(true)).click();
         expectAlert(expectedError);
 
         // Failed duplicate ends up as unable to fulfill in the complete tab
-        var failedPermission = selectPermission(fcaOutboundDataNeed, PermissionTab.OUTBOUND, PermissionStatus.COMPLETE);
+        var failedPermission = selectPermission(inboundDataNeed, PermissionTab.INBOUND, PermissionStatus.COMPLETE);
         assertThat(failedPermission).containsText("Unable to fulfill");
 
-        // Successful permission shows FCA badge and meter ID
-        var permission = selectPermission(fcaOutboundDataNeed, PermissionTab.OUTBOUND, PermissionStatus.ACTIVE);
-        assertThat(permission).containsText(permissionId);
-        assertThat(permission).containsText("FCA");
-        assertThat(permission).containsText(meterId);
+        // Create a data source matching the FCA meter ID, and one that doesn't match
+        createSimulationDataSource(dataSource, meterId);
+        createSimulationDataSource(otherDataSource, otherMeterId);
+
+        // Accept an FCA outbound permission tied to the meter ID
+        // The data source with a different meter ID is not shown
+        // The matching data source with the same meter ID gets pre-selected
+        var outboundAiidaCode = aiidaCodeForDataNeed(outboundDataNeed, meterId);
+        var outboundPermissionId = acceptOutboundPermissionRequestWithPreselectedDataSource(outboundAiidaCode,
+                                                                                            dataSource);
+
+        // Successful outbound permission shows FCA badge and meter ID
+        var outboundPermission = selectPermission(outboundDataNeed, PermissionTab.OUTBOUND, PermissionStatus.ACTIVE);
+        assertThat(outboundPermission).containsText(outboundPermissionId);
+        assertThat(outboundPermission).containsText("FCA");
+        assertThat(outboundPermission).containsText(meterId);
 
         // Clean up
-        revokePermission(permission);
+        revokeInboundPermission(inboundDataNeed);
+        revokeOutboundPermission(outboundDataNeed);
         deleteDataSource(dataSource);
+        deleteDataSource(otherDataSource);
     }
 
     @Test
@@ -218,20 +470,28 @@ class AiidaUiTests {
     }
 
     private String aiidaCodeForDataNeed(String dataNeed) {
-        var eddie = context.newPage();
-        eddie.navigate(EDDIE_URL + "/demo");
-        eddie.getByLabel("Data need").selectOption(dataNeed);
-        eddie.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Connect with EDDIE")).click();
-        eddie.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Continue")).click();
-        eddie.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Connect").setExact(true)).click();
-        return eddie.getByLabel("AIIDA code").inputValue();
+        return aiidaCodeForDataNeed(dataNeed, null);
     }
 
-    private String aiidaCodeForDataNeedWithMeterId(String dataNeed, String meterId) {
+    private String aiidaCodeForDataNeed(String dataNeed, String meterId) {
+        return aiidaCodeForDataNeed(dataNeed, meterId, null, null);
+    }
+
+    private String aiidaCodeForDataNeed(String dataNeed, String meterId, Integer min, Integer max) {
         var eddie = context.newPage();
         eddie.navigate(EDDIE_URL + "/demo");
-        eddie.getByLabel("Data need").selectOption(dataNeed);
-        eddie.getByLabel("Meter ID").fill(meterId);
+
+        eddie.getByLabel("Data need (required)").selectOption(dataNeed);
+        if (meterId != null) {
+            eddie.getByLabel("Meter ID").fill(meterId);
+        }
+        if (min != null) {
+            eddie.getByLabel("Min Limit").fill(min.toString());
+        }
+        if (max != null) {
+            eddie.getByLabel("Max Limit").fill(max.toString());
+        }
+
         eddie.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Connect with EDDIE")).click();
         eddie.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Continue")).click();
         eddie.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Connect").setExact(true)).click();
@@ -246,11 +506,12 @@ class AiidaUiTests {
         page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Add").setExact(true)).click();
     }
 
-    private String acceptInboundPermissionRequest(String aiidaCode) {
+    private String acceptInboundPermissionRequest(String aiidaCode, String displayName) {
         addPermission(aiidaCode);
 
         var dialog = page.getByRole(AriaRole.DIALOG);
         var id = dialog.locator(":text('Permission ID') + dd").textContent();
+        dialog.getByPlaceholder("Enter a display name for this permission").fill(displayName);
         dialog.getByRole(AriaRole.BUTTON).getByText("Accept").click();
 
         return id;
@@ -262,12 +523,72 @@ class AiidaUiTests {
         var dialog = page.getByRole(AriaRole.DIALOG);
         var id = dialog.locator(":text('Permission ID') + dd").textContent();
 
-        dialog.getByRole(AriaRole.LISTBOX).getByText("Select Data Source").click();
+        dialog.getByRole(AriaRole.LISTBOX).click();
         dialog.getByRole(AriaRole.OPTION).getByText(dataSource).first().click();
 
         dialog.getByRole(AriaRole.BUTTON).getByText("Accept").click();
 
         return id;
+    }
+
+    private String acceptOutboundPermissionRequestWithPreselectedDataSource(String aiidaCode, String dataSource) {
+        addPermission(aiidaCode);
+
+        var dialog = page.getByRole(AriaRole.DIALOG);
+        var id = dialog.locator(":text('Permission ID') + dd").textContent();
+        var listbox = dialog.getByRole(AriaRole.LISTBOX);
+
+        // The one data source that matches the meter ID is pre-selected
+        assertThat(listbox).containsText(dataSource);
+
+        // The data source with a different meter ID is not displayed
+        listbox.click();
+        assertThat(dialog.getByRole(AriaRole.OPTION)).hasCount(1);
+        listbox.click();
+
+        assertThat(dialog.getByRole(AriaRole.BUTTON).getByText("Accept")).isEnabled();
+        dialog.getByRole(AriaRole.BUTTON).getByText("Accept").click();
+
+        return id;
+    }
+
+    private void createSimulationDataSource(String name, String meterId) {
+        createSimulationDataSource(name, meterId, 120);
+    }
+
+    private void createSimulationDataSource(String name, String meterId, int pollingInterval) {
+        page.getByRole(AriaRole.LINK).getByText("Data Sources").click();
+        page.getByRole(AriaRole.BUTTON).getByText("Add Data Source").click();
+        page.getByLabel("Name").fill(name);
+        page.getByRole(AriaRole.LISTBOX).getByText("Asset Type").click();
+        page.getByRole(AriaRole.OPTION).getByText("CONNECTION-AGREEMENT-POINT").click();
+        page.getByRole(AriaRole.LISTBOX).getByText("Data Source Type").click();
+        page.getByRole(AriaRole.OPTION).getByText("Simulation").click();
+        page.getByRole(AriaRole.LISTBOX).getByText("Country").click();
+        page.getByRole(AriaRole.OPTION).getByText("Austria").click();
+        page.getByLabel("Polling Interval").fill(Integer.toString(pollingInterval));
+        page.getByLabel("Physical Meter ID").fill(meterId);
+        page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Meter")).click();
+        page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Add").setExact(true)).click();
+    }
+
+    private String expectMail(String recipient, String subject) {
+        for (var attempt = 0; attempt < 30; attempt++) {
+            var response = context.request().get(MAILPIT_URL + "/api/v1/messages");
+            assertThat(response).isOK();
+
+            for (var message : mapper.readTree(response.text()).path("messages")) {
+                var matchesRecipient = message.path("To").toString().contains(recipient);
+                var matchesSubject = message.path("Subject").asString().contains(subject);
+                if (matchesRecipient && matchesSubject) {
+                    var details = context.request().get(MAILPIT_URL + "/api/v1/message/" + message.path("ID").asString());
+                    assertThat(details).isOK();
+                    return mapper.readTree(details.text()).path("Text").asString();
+                }
+            }
+            page.waitForTimeout(1000);
+        }
+        throw new AssertionError("Found no mail to %s with subject '%s'".formatted(recipient, subject));
     }
 
     private void revokeInboundPermission(String name) {
@@ -304,6 +625,100 @@ class AiidaUiTests {
 
     private void expectAlert(String message) {
         assertThat(page.getByRole(AriaRole.ALERT).filter(new Locator.FilterOptions().setHasText(message))).isVisible();
+    }
+
+    private String getConnectionLimits(String permissionId, Instant from, Instant to) {
+        var response = context.request()
+                              .get(AIIDA_URL + "/connection-limits",
+                                   RequestOptions.create()
+                                                 .setHeader("Authorization", "Bearer " + fetchAccessToken())
+                                                 .setQueryParam("permissionId", permissionId)
+                                                 .setQueryParam("from", from.toString())
+                                                 .setQueryParam("to", to.toString()));
+        assertThat(response).isOK();
+        return response.text();
+    }
+
+    private String waitForConnectionLimits(
+            String permissionId,
+            Instant from,
+            Instant to,
+            String documentId,
+            int minLimitKw,
+            int maxLimitKw,
+            ObjectMapper mapper
+    ) {
+        var limits = "";
+        for (var attempt = 0; attempt < 20; attempt++) {
+            limits = getConnectionLimits(permissionId, from, to);
+            if (containsConnectionLimit(mapper.readTree(limits), documentId, minLimitKw, maxLimitKw)) {
+                return limits;
+            }
+            page.waitForTimeout(500);
+        }
+        assertTrue(containsConnectionLimit(mapper.readTree(limits), documentId, minLimitKw, maxLimitKw),
+                   "Expected connection limits to contain document ID %s with min %s and max %s, but got: %s".formatted(
+                           documentId,
+                           minLimitKw,
+                           maxLimitKw,
+                           limits));
+        return limits;
+    }
+
+    private boolean containsConnectionLimit(JsonNode limits, String documentId, int minLimitKw, int maxLimitKw) {
+        for (var limit : limits) {
+            var documentIdNode = limit.path("documentId");
+            var documentIdMatches = documentId == null ? documentIdNode.isNull() : documentId.equals(documentIdNode.asString());
+            var minLimitMatches = limit.path("minLimitKw").asInt() == minLimitKw;
+            var maxLimitMatches = limit.path("maxLimitKw").asInt() == maxLimitKw;
+            if (documentIdMatches && minLimitMatches && maxLimitMatches) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String minMaxEnvelope(
+            String permissionId,
+            String dataNeedId,
+            String meterId,
+            String documentId,
+            Instant createdAt,
+            Instant intervalStart,
+            Instant intervalEnd,
+            int minLimitKw,
+            int maxLimitKw
+    ) throws IOException {
+        try (var input = getClass().getClassLoader().getResourceAsStream("min-max-envelope.json")) {
+            var envelope = new String(requireNonNull(input).readAllBytes(), StandardCharsets.UTF_8);
+            return envelope.replace("{permissionId}", permissionId)
+                           .replace("{dataNeedId}", dataNeedId)
+                           .replace("{meterId}", meterId)
+                           .replace("{documentId}", documentId)
+                           .replace("{createdAt}", createdAt.toString())
+                           .replace("{intervalStart}", intervalStart.toString())
+                           .replace("{intervalEnd}", intervalEnd.toString())
+                           .replace("{minLimitKw}", Integer.toString(minLimitKw))
+                           .replace("{maxLimitKw}", Integer.toString(maxLimitKw));
+        }
+    }
+
+    private String fetchAccessToken() {
+        var keycloakUrl = page.evaluate("THYMELEAF_KEYCLOAK_URL").toString();
+        var realm = page.evaluate("THYMELEAF_KEYCLOAK_REALM").toString();
+        var clientId = page.evaluate("THYMELEAF_KEYCLOAK_CLIENT").toString();
+
+        var response = context.request().post(
+                keycloakUrl + "/realms/" + realm + "/protocol/openid-connect/token",
+                RequestOptions.create()
+                              .setHeader("content-type", "application/x-www-form-urlencoded")
+                              .setForm(FormData.create()
+                                               .set("grant_type", "password")
+                                               .set("client_id", clientId)
+                                               .set("username", "aiida")
+                                               .set("password", "aiida")));
+        assertThat(response).isOK();
+        return mapper.readTree(response.text()).path("access_token").asString();
     }
 
     private enum PermissionTab {

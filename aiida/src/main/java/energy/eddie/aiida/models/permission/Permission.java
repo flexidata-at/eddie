@@ -18,11 +18,13 @@ import energy.eddie.dataneeds.utils.cron.CronExpressionSerializer;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.annotation.Nullable;
 import jakarta.persistence.*;
+import org.hibernate.annotations.Formula;
 import org.jspecify.annotations.NonNull;
 import org.springframework.scheduling.support.CronExpression;
 import tools.jackson.databind.annotation.JsonDeserialize;
 import tools.jackson.databind.annotation.JsonSerialize;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -54,6 +56,12 @@ public class Permission {
     @JsonProperty
     @Nullable
     private String serviceName;
+
+    @Column(name = "display_name")
+    @Schema(description = "User-chosen display name for this permission.", example = "My smart meter")
+    @JsonProperty
+    @Nullable
+    private String displayName;
 
     @Column(name = "start_time")
     @Schema(description = "UTC timestamp when the data sharing should start.")
@@ -92,8 +100,24 @@ public class Permission {
     private String meterId;
 
     @Nullable
+    @Formula("(SELECT d.min_limit_kw FROM connection_limit_default d WHERE d.permission_id = permission_id AND d.replaced_at IS NULL ORDER BY d.start DESC, d.id DESC LIMIT 1)")
+    @JsonProperty
+    @Schema(description = "Optional current default minimum energy consumption or production limit in kilowatts for controllable units.", example = "1.0")
+    private BigDecimal minLimitKw;
+
+    @Nullable
+    @Formula("(SELECT d.max_limit_kw FROM connection_limit_default d WHERE d.permission_id = permission_id AND d.replaced_at IS NULL ORDER BY d.start DESC, d.id DESC LIMIT 1)")
+    @Schema(description = "Optional current default maximum energy consumption or production limit in kilowatts for controllable units.", example = "10.0")
+    @JsonProperty
+    private BigDecimal maxLimitKw;
+
+    @Nullable
+    @Column(name = "monitoring_data_source_id")
+    private UUID monitoringDataSourceId;
+
+    @Nullable
     @PrimaryKeyJoinColumn
-    @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.EAGER)
     @JsonProperty
     private MqttStreamingConfig mqttStreamingConfig;
 
@@ -225,10 +249,48 @@ public class Permission {
     }
 
     /**
+     * Optional current default minimum energy consumption or production limit in kilowatts for controllable units.
+     * Resolved from the current connection limit default with the newest start time in the database.
+     */
+    public @Nullable BigDecimal minLimitKw() {
+        return minLimitKw;
+    }
+
+    /**
+     * Optional current default maximum energy consumption or production limit in kilowatts for controllable units.
+     * Resolved from the current connection limit default with the newest start time in the database.
+     */
+    public @Nullable BigDecimal maxLimitKw() {
+        return maxLimitKw;
+    }
+
+    /**
+     * Returns the data source monitored for connection limit violations, or null if none is assigned.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public @Nullable UUID monitoringDataSourceId() {
+        return monitoringDataSourceId;
+    }
+
+    /**
+     * Assigns the data source to monitor for connection limit violations, or clears the assignment if null.
+     */
+    public void updateMonitoringDataSource(@Nullable UUID dataSourceId) {
+        monitoringDataSourceId = dataSourceId;
+    }
+
+    /**
      * Returns the service name for which this permission is for.
      */
     public @Nullable String serviceName() {
         return serviceName;
+    }
+
+    /**
+     * Returns the user-chosen display name for this permission. Defaults to the data need's name.
+     */
+    public @Nullable String displayName() {
+        return displayName;
     }
 
     public @Nullable InboundMessageFormat inboundMessageFormat() {
@@ -319,14 +381,42 @@ public class Permission {
         this.meterId = meterId;
     }
 
+    public void setMinLimitKw(@Nullable BigDecimal minLimitKw) {
+        this.minLimitKw = minLimitKw;
+    }
+
+    public void setMaxLimitKw(@Nullable BigDecimal maxLimitKw) {
+        this.maxLimitKw = maxLimitKw;
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = requireNonNull(displayName);
+    }
+
     public void setMqttStreamingConfig(MqttStreamingConfig mqttStreamingConfig) {
         this.mqttStreamingConfig = requireNonNull(mqttStreamingConfig);
     }
 
-    public void setDataNeed(AiidaLocalDataNeed dataNeed) {
+    /**
+     * Initializes the permission from the data need by deriving {@link #serviceName}, {@link #displayName}
+     * and {@link #inboundMessageFormat} from it.
+     */
+    public void initializeFromDataNeed(AiidaLocalDataNeed dataNeed) {
         this.dataNeed = requireNonNull(dataNeed);
-        this.serviceName = dataNeed.name();
+        deriveServiceName(dataNeed);
+        deriveDisplayName(dataNeed);
+        deriveInboundMessageFormat(dataNeed);
+    }
 
+    private void deriveServiceName(AiidaLocalDataNeed dataNeed) {
+        this.serviceName = dataNeed.name();
+    }
+
+    private void deriveDisplayName(AiidaLocalDataNeed dataNeed) {
+        this.displayName = dataNeed.name();
+    }
+
+    private void deriveInboundMessageFormat(AiidaLocalDataNeed dataNeed) {
         if (dataNeed instanceof InboundAiidaLocalDataNeed && this.inboundMessageFormat == null) {
             this.inboundMessageFormat = InboundMessageFormat.CIM_1_12;
         } else {
@@ -367,5 +457,15 @@ public class Permission {
             return transmissionSchedule;
         }
         return dataNeed != null ? dataNeed.transmissionSchedule() : null;
+    }
+
+    /**
+     * True if the permission allows the eligible party to send connection limits,
+     * indicating that the permission supports connection limit features.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    @Schema(description = "Whether the permission supports connection limit features such as monitoring.", example = "true")
+    public boolean supportsConnectionLimits() {
+        return dataNeed instanceof InboundAiidaLocalDataNeed && dataNeed.supportsConnectionLimits();
     }
 }

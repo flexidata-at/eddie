@@ -7,32 +7,39 @@ import StatusTag from './StatusTag.vue'
 import cronstrue from 'cronstrue/i18n'
 import Button from '@/components/Button.vue'
 import RevokeIcon from '@/assets/icons/RevokeIcon.svg'
+import PenIcon from '@/assets/icons/PenIcon.svg'
 import { usePermissionDialog } from '@/composables/permission-dialog'
 import { useConfirmDialog } from '@/composables/confirm-dialog'
-import { BASE_URL, revokePermission, updateInboundMessageFormat } from '@/api'
-import { fetchPermissions } from '@/stores/permissions'
-import { ref, useTemplateRef, watch } from 'vue'
+import { useLastMessageRefresh } from '@/composables/last-message-refresh'
+import {
+  deleteConnectionLimitMonitoring,
+  revokePermission,
+  updateConnectionLimitMonitoring,
+  updateInboundMessageFormat,
+} from '@/api'
+import { dataSources, fetchDataSources } from '@/stores/dataSources'
+import { fetchPermissions, isMonitorablePermission, permissions } from '@/stores/permissions'
+import { computed, onMounted, ref, watch } from 'vue'
 import EyeIcon from '@/assets/icons/EyeIcon.svg'
-import CrossedOutEyeIcon from '@/assets/icons/CrossedOutEyeIcon.svg'
-import ToolTipIcon from '@/assets/icons/ToolTipIcon.svg'
-import { onClickOutside } from '@vueuse/core'
-import CopyButton from './CopyButton.vue'
 import MessageDownloadButton from '@/components/MessageDownloadButton.vue'
 import { useI18n } from 'vue-i18n'
 import CustomSelect from './CustomSelect.vue'
+import ConnectionMonitorIcon from '@/assets/icons/ConnectionMonitorIcon.svg'
 
 const { t, locale } = useI18n()
 const { confirm } = useConfirmDialog()
-const target = useTemplateRef('target')
 const { permission, status } = defineProps<{
   permission: AiidaPermission
   status?: PermissionTypes
 }>()
+const emit = defineEmits<{
+  configureInboundProvisioning: [permission: AiidaPermission]
+  resetInboundServerPassword: [permission: AiidaPermission]
+  resetInboundRestApiKey: [permission: AiidaPermission]
+}>()
 
 const { updatePermission } = usePermissionDialog()
 
-const show = ref(false)
-const showToolTip = ref(false)
 const selectedInboundMessageFormat = ref(permission.inboundMessageFormat)
 
 const inboundMessageFormatOptions: { label: string; value: InboundMessageFormat }[] = [
@@ -104,15 +111,88 @@ const handleInboundMessageFormatSelection = async (
   }
 }
 
-const showInboundApiKey = () => {
-  show.value = !show.value
+const openInboundProvisioningModal = () => {
+  emit('configureInboundProvisioning', permission)
 }
 
-const generateStringFromLength = (length: number, char: string) => {
-  return Array.from({ length }, () => char).join('')
+const isInboundMqttProvisioning = computed(
+  () =>
+    permission.dataNeed.type === 'inbound-aiida' &&
+    (permission.dataSource?.provisioningType === 'MQTT_SERVER' ||
+      permission.dataSource?.provisioningType === 'MQTT_CLIENT'),
+)
+
+const isInboundRestProvisioning = computed(
+  () =>
+    permission.dataNeed.type === 'inbound-aiida' &&
+    (permission.dataSource?.provisioningType === 'REST_BEARER' ||
+      permission.dataSource?.provisioningType === 'REST_API_TOKEN'),
+)
+
+const inboundMqttConnection = computed(
+  () => permission.dataSource?.mqttProvisioningConfig?.connection,
+)
+const inboundMqttServerUri = computed(
+  () => inboundMqttConnection.value?.externalHost ?? inboundMqttConnection.value?.internalHost,
+)
+const inboundMqttTopic = computed(() => permission.dataSource?.mqttProvisioningConfig?.topic)
+
+const resetInboundRestApiKey = async () => {
+  if (
+    await confirm(
+      t('permissions.restApiKey.resetTitle'),
+      t('permissions.restApiKey.resetDescription'),
+      t('permissions.restApiKey.resetButton'),
+      t('cancelButton'),
+    )
+  ) {
+    emit('resetInboundRestApiKey', permission)
+  }
 }
 
-onClickOutside(target, () => (showToolTip.value = false))
+const dataSourceDisplayName = computed(() => {
+  if (!permission.dataSource) return undefined
+  const inboundPermission = permissions.value.find(
+    (p) => p.dataNeed.type === 'inbound-aiida' && p.dataSource?.id === permission.dataSource?.id,
+  )
+  return inboundPermission?.displayName ?? permission.dataSource.name
+})
+
+const NO_MONITORING_DATA_SOURCE = 'NONE'
+const monitoringDataSourceId = ref<string>(
+  permission.monitoringDataSourceId ?? NO_MONITORING_DATA_SOURCE,
+)
+
+const monitoringDataSourceOptions = computed(() => [
+  { label: t('permissions.dropdown.monitoringDataSourceNone'), value: NO_MONITORING_DATA_SOURCE },
+  ...dataSources.value.map(({ id, name }) => ({ label: name, value: id })),
+])
+
+const handleMonitoringDataSourceSelection = async (
+  value: string | number | boolean | undefined,
+) => {
+  try {
+    if (value === NO_MONITORING_DATA_SOURCE) {
+      await deleteConnectionLimitMonitoring(permission.permissionId)
+    } else {
+      await updateConnectionLimitMonitoring(permission.permissionId, String(value))
+    }
+    await fetchPermissions()
+  } catch {
+    monitoringDataSourceId.value = permission.monitoringDataSourceId ?? NO_MONITORING_DATA_SOURCE
+  }
+}
+
+onMounted(async () => {
+  if (permission.supportsConnectionLimits && !dataSources.value.length) {
+    await fetchDataSources()
+  }
+})
+
+const { lastMessageAt } = useLastMessageRefresh(
+  () => permission,
+  () => !!status,
+)
 </script>
 
 <template>
@@ -146,6 +226,30 @@ onClickOutside(target, () => (showToolTip.value = false))
         <dt>{{ t('permissions.dropdown.meterId') }}</dt>
         <dd>{{ permission.meterId }}</dd>
       </div>
+      <div class="permission-field" v-if="permission.minLimitKw != null">
+        <dt>{{ t('permissions.dropdown.minLimitKw') }}</dt>
+        <dd>{{ permission.minLimitKw }} kW</dd>
+      </div>
+      <div class="permission-field" v-if="permission.maxLimitKw != null">
+        <dt>{{ t('permissions.dropdown.maxLimitKw') }}</dt>
+        <dd>{{ permission.maxLimitKw }} kW</dd>
+      </div>
+      <template v-if="permission.supportsConnectionLimits">
+        <div class="permission-field permission-field--select">
+          <dt>{{ t('permissions.dropdown.monitoringDataSource') }}</dt>
+          <dd>
+            <CustomSelect
+              v-model="monitoringDataSourceId"
+              :options="monitoringDataSourceOptions"
+              :placeholder="t('permissions.dropdown.monitoringDataSourcePlaceholder')"
+              @update:model-value="handleMonitoringDataSourceSelection"
+            />
+          </dd>
+        </div>
+        <p class="monitoring-hint">
+          {{ t('permissions.dropdown.monitoringDataSourceHint') }}
+        </p>
+      </template>
       <div class="permission-field">
         <dt>{{ t('permissions.dropdown.start') }}</dt>
         <dd>
@@ -182,6 +286,28 @@ onClickOutside(target, () => (showToolTip.value = false))
           </StatusTag>
         </dd>
       </div>
+      <template v-if="isInboundMqttProvisioning">
+        <div class="permission-field">
+          <dt>{{ t('permissions.mqttProvisioning.mode') }}</dt>
+          <dd>
+            {{ t(`permissions.mqttProvisioning.types.${permission.dataSource?.provisioningType}`) }}
+          </dd>
+        </div>
+      </template>
+      <template v-if="isInboundMqttProvisioning && inboundMqttConnection">
+        <div v-if="inboundMqttServerUri" class="permission-field">
+          <dt>{{ t('datasources.card.mqttServerUri') }}</dt>
+          <dd>{{ inboundMqttServerUri }}</dd>
+        </div>
+        <div class="permission-field">
+          <dt>{{ t('datasources.card.mqttUsername') }}</dt>
+          <dd>{{ inboundMqttConnection.username }}</dd>
+        </div>
+        <div v-if="inboundMqttTopic" class="permission-field">
+          <dt>{{ t('datasources.card.mqttTopic') }}</dt>
+          <dd>{{ inboundMqttTopic }}</dd>
+        </div>
+      </template>
     </div>
     <div class="column">
       <template v-if="permission.dataNeed.type !== 'inbound-aiida'">
@@ -201,7 +327,7 @@ onClickOutside(target, () => (showToolTip.value = false))
         </div>
         <div class="permission-field" v-if="permission.dataSource">
           <dt>{{ t('permissions.dropdown.dataSource') }}</dt>
-          <dd>{{ permission.dataSource?.name ?? 'undefined' }}</dd>
+          <dd>{{ dataSourceDisplayName ?? 'undefined' }}</dd>
         </div>
         <div
           class="permission-field"
@@ -233,64 +359,6 @@ onClickOutside(target, () => (showToolTip.value = false))
           </dd>
         </div>
       </template>
-      <template v-if="permission.dataNeed.type === 'inbound-aiida' && permission.dataSource">
-        <div
-          class="permission-field access-code-field"
-          v-if="permission.dataSource.accessCode"
-          ref="target"
-        >
-          <dt>
-            API Key
-            <button
-              @click="showToolTip = !showToolTip"
-              :aria-label="t('permissions.toggleTooltip')"
-              class="tool-tip-button"
-              :class="{ active: showToolTip }"
-            >
-              <ToolTipIcon />
-            </button>
-          </dt>
-          <dd>
-            {{
-              show
-                ? permission.dataSource.accessCode
-                : generateStringFromLength(permission.dataSource.accessCode.length, '●')
-            }}
-
-            <CopyButton :copy-text="permission.dataSource.accessCode" />
-            <button
-              class="show-button"
-              @click="showInboundApiKey"
-              :aria-label="
-                show ? t('permissions.showMqttPassword') : t('permissions.hideMqttPassword')
-              "
-            >
-              <Transition mode="out-in">
-                <component :is="show ? EyeIcon : CrossedOutEyeIcon" />
-              </Transition>
-            </button>
-          </dd>
-          <Transition>
-            <div v-if="showToolTip" class="tool-tip">
-              <p>{{ t('permissions.dropdown.inboundTooltip') }}</p>
-              <ul>
-                <li class="copy-link">
-                  X-API-Key Header
-                  <CopyButton
-                    :copy-text="`curl ${BASE_URL}/inbound/latest/${permission.permissionId} \\  --header 'X-API-Key: ${permission.dataSource.accessCode}'`"
-                  />
-                </li>
-                <li class="copy-link">
-                  apiKey Query Parameter
-                  <CopyButton
-                    :copy-text="`curl ${BASE_URL}/inbound/latest/${permission.permissionId}?apiKey=${permission.dataSource.accessCode}`"
-                  />
-                </li>
-              </ul>
-            </div>
-          </Transition>
-        </div>
-      </template>
       <div class="permission-field">
         <dt>{{ t('permissions.dropdown.schemas') }}</dt>
         <div class="column schema">
@@ -315,17 +383,58 @@ onClickOutside(target, () => (showToolTip.value = false))
         <dt>{{ t('permissions.dropdown.permissionID') }}</dt>
         <dd>{{ permission.permissionId }}</dd>
       </div>
-      <div class="permission-field" v-if="permission.unimplemented">
-        <dt>Last Data Package sent</dt>
-        <dd>PLACEHOLDER</dd>
+      <div v-if="status" class="permission-field">
+        <dt>
+          {{
+            permission.dataNeed.type === 'inbound-aiida'
+              ? t('permissions.dropdown.lastMessageReceived')
+              : t('permissions.dropdown.lastMessageSent')
+          }}
+        </dt>
+        <dd>{{ lastMessageAt ? dateTimeFormat.format(lastMessageAt) : 'N/A' }}</dd>
       </div>
-      <div v-if="status === 'Active'" class="actions-row">
-        <Button button-style="error" class="action-btn" @click="handleRevoke">
-          <RevokeIcon /> {{ t('revokeButton') }}
-        </Button>
-        <MessageDownloadButton :data="permission" class="action-btn">
-          <EyeIcon /> {{ t('permissions.dropdown.downloadLatestMessageButton') }}
-        </MessageDownloadButton>
+      <div v-if="status === 'Active'" class="permission-actions">
+        <div class="actions-row actions-row--end" v-if="isMonitorablePermission(permission)">
+          <Button
+            :isLink="true"
+            :href="`/connection-monitor?permission=${permission.permissionId}`"
+          >
+            <ConnectionMonitorIcon />
+            {{ t('permissions.openConnectionMonitor') }}
+          </Button>
+        </div>
+        <div
+          v-if="permission.dataNeed.type === 'inbound-aiida'"
+          class="actions-row actions-row--end"
+        >
+          <Button
+            v-if="permission.dataSource?.provisioningType === 'MQTT_SERVER'"
+            button-style="secondary"
+            class="action-btn"
+            @click="emit('resetInboundServerPassword', permission)"
+          >
+            {{ t('datasources.card.resetPasswordButton') }}
+          </Button>
+          <Button
+            v-if="isInboundRestProvisioning"
+            button-style="secondary"
+            class="action-btn"
+            @click="resetInboundRestApiKey"
+          >
+            {{ t('permissions.restApiKey.resetButton') }}
+          </Button>
+          <Button button-style="primary" class="action-btn" @click="openInboundProvisioningModal">
+            <PenIcon /> {{ t('permissions.mqttProvisioning.openButton') }}
+          </Button>
+        </div>
+        <div class="actions-row">
+          <Button button-style="error" class="action-btn" @click="handleRevoke">
+            <RevokeIcon /> {{ t('revokeButton') }}
+          </Button>
+          <MessageDownloadButton :data="permission" class="action-btn">
+            <EyeIcon /> {{ t('permissions.dropdown.downloadLatestMessageButton') }}
+          </MessageDownloadButton>
+        </div>
       </div>
       <Button
         v-if="status === 'Pending'"
@@ -394,6 +503,12 @@ onClickOutside(target, () => (showToolTip.value = false))
   gap: var(--spacing-sm);
 }
 
+.monitoring-hint {
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--eddie-grey-medium);
+}
+
 .graph {
   flex-direction: column;
 
@@ -406,82 +521,55 @@ onClickOutside(target, () => (showToolTip.value = false))
   margin: auto 0 0 auto;
 }
 
+.permission-actions,
 .actions-row {
   display: flex;
   flex-direction: column;
-
   gap: var(--spacing-sm);
-  align-items: center;
+}
+
+.permission-actions {
   margin-top: auto;
+}
+
+.monitor-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border: 1px solid var(--eddie-primary);
+  border-radius: 2rem;
+  color: var(--eddie-primary);
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    background-color 0.3s ease-in-out,
+    color 0.3s ease-in-out;
+
+  &:hover {
+    color: var(--light);
+    background-color: var(--eddie-primary);
+  }
+}
+
+.actions-row {
+  align-items: center;
   justify-content: space-between;
 }
+
+.actions-row--end {
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
 .actions-row .action-btn {
   width: 100%;
   justify-content: center;
 }
 
-.access-code-field {
-  position: relative;
-  word-break: keep-all;
-  button {
-    padding: unset;
-    cursor: pointer;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-  dd,
-  dt {
-    display: flex;
-    gap: var(--spacing-sm);
-    align-items: center;
-  }
-}
-
-.tool-tip-button {
-  transition: color 0.3s ease-in-out;
-  &:hover,
-  &.active {
-    color: var(--eddie-primary);
-  }
-}
-
-.tool-tip {
-  position: absolute;
-  box-shadow: 0px 2px 5px 0px #00000040;
-  top: 100%;
-  left: 0;
-  width: 80%;
-  padding: var(--spacing-sm);
-  background-color: var(--light);
-  border: 1px solid var(--eddie-primary);
-  border-radius: var(--border-radius);
-  color: var(--eddie-grey-medium);
-
-  &::after {
-    content: '';
-    position: absolute;
-    bottom: 100%;
-    left: 10%;
-    margin-left: var(--spacing-xs);
-    border-width: var(--spacing-xs);
-    border-style: solid;
-    border-color: var(--eddie-primary) transparent transparent transparent;
-    transform: rotate(180deg);
-  }
-}
-
-.copy-link {
-  display: grid;
-  grid-template-columns: 50% 50%;
-  align-items: center;
-  gap: var(--spacing-sm);
-  &:first-child {
-    margin: var(--spacing-sm) 0;
-  }
-  button {
-    justify-content: flex-start;
-  }
+.actions-row--end .action-btn {
+  width: fit-content;
 }
 
 .v-enter-active,

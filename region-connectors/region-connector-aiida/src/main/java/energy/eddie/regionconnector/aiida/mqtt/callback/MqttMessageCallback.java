@@ -5,9 +5,7 @@ package energy.eddie.regionconnector.aiida.mqtt.callback;
 
 import energy.eddie.regionconnector.aiida.exceptions.AiidaMessageProcessorRegistryException;
 import energy.eddie.regionconnector.aiida.exceptions.PermissionInvalidException;
-import energy.eddie.regionconnector.aiida.mqtt.events.MqttConnectedEvent;
 import energy.eddie.regionconnector.aiida.mqtt.message.processor.AiidaMessageProcessorRegistry;
-import energy.eddie.regionconnector.aiida.publisher.MqttEventPublisher;
 import energy.eddie.regionconnector.shared.exceptions.PermissionNotFoundException;
 import org.eclipse.paho.mqttv5.client.IMqttToken;
 import org.eclipse.paho.mqttv5.client.MqttCallback;
@@ -23,14 +21,11 @@ import java.io.IOException;
 public class MqttMessageCallback implements MqttCallback {
     private static final Logger LOGGER = LoggerFactory.getLogger(MqttMessageCallback.class);
     private final AiidaMessageProcessorRegistry messageProcessorRegistry;
-    private final MqttEventPublisher eventPublisher;
 
     public MqttMessageCallback(
-            AiidaMessageProcessorRegistry messageProcessorRegistry,
-            MqttEventPublisher eventPublisher
+            AiidaMessageProcessorRegistry messageProcessorRegistry
     ) {
         this.messageProcessorRegistry = messageProcessorRegistry;
-        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -63,7 +58,6 @@ public class MqttMessageCallback implements MqttCallback {
     @Override
     public void connectComplete(boolean reconnect, String serverURI) {
         LOGGER.info("Connected to MQTT broker {}, was because of reconnect: {}", serverURI, reconnect);
-        eventPublisher.publishEvent(new MqttConnectedEvent(serverURI));
     }
 
     @Override

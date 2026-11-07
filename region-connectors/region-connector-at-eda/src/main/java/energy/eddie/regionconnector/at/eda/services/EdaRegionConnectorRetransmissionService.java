@@ -14,7 +14,7 @@ import energy.eddie.regionconnector.at.eda.TransmissionException;
 import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
 import energy.eddie.regionconnector.at.eda.requests.CPRequestCR;
 import energy.eddie.regionconnector.at.eda.requests.CPRequestResult;
-import energy.eddie.regionconnector.at.eda.requests.MessageId;
+import energy.eddie.regionconnector.at.eda.requests.EdaGroupingIdFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -33,6 +33,7 @@ public class EdaRegionConnectorRetransmissionService implements RegionConnectorR
     private static final Logger LOGGER = LoggerFactory.getLogger(EdaRegionConnectorRetransmissionService.class);
 
     private final AtConfiguration configuration;
+    private final EdaGroupingIdFactory groupingIdFactory;
     private final EdaAdapter edaAdapter;
     private final AtPermissionRequestRepository repository;
 
@@ -46,10 +47,12 @@ public class EdaRegionConnectorRetransmissionService implements RegionConnectorR
 
     public EdaRegionConnectorRetransmissionService(
             AtConfiguration configuration,
+            EdaGroupingIdFactory groupingIdFactory,
             EdaAdapter edaAdapter,
             AtPermissionRequestRepository repository
     ) {
         this.configuration = configuration;
+        this.groupingIdFactory = groupingIdFactory;
         this.edaAdapter = edaAdapter;
         this.repository = repository;
 
@@ -89,8 +92,9 @@ public class EdaRegionConnectorRetransmissionService implements RegionConnectorR
             ));
         }
 
-        if (retransmissionRequest.from().isBefore(request.start()) ||
-            retransmissionRequest.to().isAfter(request.end())
+        if (!retransmissionRequest.from().isBefore(retransmissionRequest.to())
+            || retransmissionRequest.from().isBefore(request.start())
+            || (request.end() != null && retransmissionRequest.to().isAfter(request.end()))
         ) {
             LOGGER.warn("Retransmission request not within permission time frame");
             return Mono.just(new NoPermissionForTimeFrame(
@@ -99,13 +103,18 @@ public class EdaRegionConnectorRetransmissionService implements RegionConnectorR
             ));
         }
 
+        if (request.meteringPointId().filter(id -> !id.isBlank()).isEmpty()
+            || request.consentId().filter(id -> !id.isBlank()).isEmpty()) {
+            return Mono.just(new NoActivePermission(retransmissionRequest.permissionId(), now));
+        }
+
         ZonedDateTime created = ZonedDateTime.now(AT_ZONE_ID);
-        var messageId = new MessageId(configuration.eligiblePartyId(), created).toString();
+        var messageId = groupingIdFactory.create(created);
 
         while (retransmissionResults.containsKey(messageId)) {
             // MessageId is only accurate to milliseconds, ensure uniqueness
             created = created.plus(1, ChronoUnit.MILLIS);
-            messageId = new MessageId(configuration.eligiblePartyId(), created).toString();
+            messageId = groupingIdFactory.create(created);
         }
 
         CPRequestCR cpRequestCR = new CPRequestCR(

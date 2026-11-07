@@ -3,70 +3,81 @@
 
 package energy.eddie.regionconnector.at.eda.config;
 
-import energy.eddie.regionconnector.at.eda.ponton.PontonXPAdapterConfiguration;
+import energy.eddie.regionconnector.at.eda.requests.EdaGroupingIdFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AtConfigurationTest {
+    private static final String PREFIX = "region-connector.at.eda.";
+
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withUserConfiguration(TestConfig.class);
+            .withUserConfiguration(EnableConfig.class)
+            .withPropertyValues(PREFIX + "eligibleparty.id=EP123456");
 
     @Test
-    void atConfiguration_bindsWithoutConversationIdPrefix() {
-        contextRunner
-                .withPropertyValues("region-connector.at.eda.eligibleparty.id=EP123456")
-                .run(context -> assertThat(context.getBean(AtConfiguration.class).conversationIdPartyIdFor(
-                        AtConfiguration.PartyIdType.ELIGIBLE_PARTY
-                )).isEqualTo("EP123456"));
+    void omittedConversationIdPrefix_usesEmptyDefault() {
+        contextRunner.run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(AtConfiguration.class).conversationIdPrefix()).isEmpty();
+        });
     }
 
     @Test
-    void atConfiguration_filtersCharactersDisallowedInConversationIdPrefix() {
+    void configuredConversationIdPrefix_isBound() {
         contextRunner
-                .withPropertyValues(
-                        "region-connector.at.eda.eligibleparty.id=EP123456",
-                        "region-connector.at.eda.conversation-id.prefix=DEMO-_+#"
-                )
-                .run(context -> assertThat(context.getBean(AtConfiguration.class).conversationIdPartyIdFor(
-                        AtConfiguration.PartyIdType.ELIGIBLE_PARTY
-                )).isEqualTo("DEMOEP123456"));
+                .withPropertyValues(PREFIX + "conversation-id.prefix=DEV1")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(AtConfiguration.class).conversationIdPrefix()).isEqualTo("DEV1");
+                });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"DEV-", "DEV_1", "+"})
+    void invalidConversationIdPrefix_failsStartup(String prefix) {
+        contextRunner
+                .withPropertyValues(PREFIX + "conversation-id.prefix=" + prefix)
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .rootCause()
+                            .hasMessageContaining("must contain only ASCII letters and digits");
+                });
     }
 
     @Test
-    void atConfiguration_ignoresConversationIdPrefixWhenNoValidCharactersRemain() {
+    void conversationIdPrefixProducingOverlongGroupingId_failsStartup() {
         contextRunner
-                .withPropertyValues(
-                        "region-connector.at.eda.eligibleparty.id=EP123456",
-                        "region-connector.at.eda.conversation-id.prefix=-_+#"
-                )
-                .run(context -> assertThat(context.getBean(AtConfiguration.class).conversationIdPartyIdFor(
-                        AtConfiguration.PartyIdType.ELIGIBLE_PARTY
-                )).isEqualTo("EP123456"));
+                .withPropertyValues(PREFIX + "conversation-id.prefix=12345678901234")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .rootCause()
+                            .hasMessageStartingWith(
+                                    "region-connector.at.eda.conversation-id.prefix is too long " +
+                                    "for the configured eligible party ID:"
+                            )
+                            .hasMessageContaining("exceeds the maximum of 35 characters");
+                });
     }
 
     @Test
-    void pontonXPAdapterConfiguration_bindsWithDefaultConnectionWatchdogProperties() {
+    void blankEligiblePartyId_failsStartup() {
         contextRunner
-                .withPropertyValues(
-                        "region-connector.at.eda.ponton.messenger.adapter.id=adapter",
-                        "region-connector.at.eda.ponton.messenger.adapter.version=1.0",
-                        "region-connector.at.eda.ponton.messenger.hostname=localhost",
-                        "region-connector.at.eda.ponton.messenger.port=2600",
-                        "region-connector.at.eda.ponton.messenger.api.endpoint=http://localhost/api",
-                        "region-connector.at.eda.ponton.messenger.folder=/tmp",
-                        "region-connector.at.eda.ponton.messenger.username=user",
-                        "region-connector.at.eda.ponton.messenger.password=password"
-                )
-                .run(context -> assertThat(context.getBean(PontonXPAdapterConfiguration.class).inboundConnections())
-                        .isEqualTo(1));
+                .withPropertyValues(PREFIX + "eligibleparty.id=")
+                .run(context -> assertThat(context).hasFailed());
     }
 
     @Configuration(proxyBeanMethods = false)
-    @EnableConfigurationProperties({AtConfiguration.class, PontonXPAdapterConfiguration.class})
-    static class TestConfig {
+    @EnableConfigurationProperties(AtConfiguration.class)
+    @Import(EdaGroupingIdFactory.class)
+    static class EnableConfig {
     }
 }

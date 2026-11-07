@@ -3,70 +3,37 @@
 
 package energy.eddie.regionconnector.at.eda.config;
 
-import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.bind.ConstructorBinding;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.boot.context.properties.bind.Name;
-
-import static java.util.Objects.requireNonNull;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * The main configuration for the EDA region connector.
  *
- * @param eligiblePartyId       ID that will be used as the sender for all messages sent to EDA.
- *                              This ID must be registered with EDA at <a href="https://www.ebutilities.at/registrierung">ebUtilities</a>.
- * @param conversationIdPrefix  Optional prefix prepended to generated conversation IDs after removing characters not
- *                              allowed by the Ponton GroupingId pattern.
+ * @param eligiblePartyId      ID that will be used as the sender for all messages sent to EDA.
+ *                             This ID must be registered with EDA at <a href="https://www.ebutilities.at/registrierung">ebUtilities</a>.
+ * @param conversationIdPrefix Optional prefix used for generated EDA message and conversation IDs.
  */
+@Validated
 @ConfigurationProperties("region-connector.at.eda")
-public record AtConfiguration(@Name("eligibleparty.id") String eligiblePartyId, @Nullable String energyCommunityId,
-                              @Nullable String energyCommunityPartyId,
-                              @Name("conversation-id.prefix") @Nullable String conversationIdPrefix) {
-    private static final String GROUPING_ID_INVALID_CHARACTERS = "[^0-9A-Za-z]";
+public record AtConfiguration(
+        @Name("eligibleparty.id") @NotBlank String eligiblePartyId,
+        @Nullable String energyCommunityId,
+        @Name("conversation-id.prefix")
+        @NotNull
+        @Pattern(regexp = CONVERSATION_ID_PREFIX_PATTERN,
+                message = "must contain only ASCII letters and digits")
+        @DefaultValue("") String conversationIdPrefix
+) {
+    public static final String CONVERSATION_ID_PREFIX_PATTERN = "[0-9A-Za-z]*";
 
-    @ConstructorBinding
-    public AtConfiguration {
-    }
-
-    public AtConfiguration(
-            String eligiblePartyId,
-            @Nullable String energyCommunityId,
-            @Nullable String energyCommunityPartyId
-    ) {
-        this(eligiblePartyId, energyCommunityId, energyCommunityPartyId, null);
-    }
-
-    @AssertTrue(message = "If the energy community ID has been set, the energy community party ID must also be set")
-    public boolean isEnergyCommunityIdSetMustBeEnergyCommunityPartyIdAlsoSet() {
-        return energyCommunityId != null && energyCommunityPartyId != null;
-    }
-
-    /**
-     * Returns the party ID for the specific type.
-     *
-     * @param type whether the party ID of the energy community or the eligible party ID is needed.
-     * @return the party ID for the specified type
-     * @throws NullPointerException if the EnergyCommunity type is specified, but the energy community type is not configured, which should never happen.
-     *                              If this exception is thrown, the API is used incorrectly or a bug has been introduced.
-     */
-    public String partyIdFor(PartyIdType type) {
-        return switch (type) {
-            case ENERGY_COMMUNITY -> requireNonNull(energyCommunityPartyId(),
-                                                    "energyCommunityPartyId must not be null when requesting the party ID of an energy community");
-            case ELIGIBLE_PARTY -> eligiblePartyId();
-        };
-    }
-
-    public String conversationIdPartyIdFor(PartyIdType type) {
-        if (conversationIdPrefix == null || conversationIdPrefix.isBlank()) {
-            return partyIdFor(type);
-        }
-        var sanitizedPrefix = conversationIdPrefix.replaceAll(GROUPING_ID_INVALID_CHARACTERS, "");
-        if (sanitizedPrefix.isEmpty()) {
-            return partyIdFor(type);
-        }
-        return sanitizedPrefix + partyIdFor(type);
+    public boolean supportsEnergyCommunity() {
+        return energyCommunityId != null;
     }
 
     public enum PartyIdType {

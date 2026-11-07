@@ -1,13 +1,12 @@
-<!--
-SPDX-FileCopyrightText: 2025 The EDDIE Developers <eddie.developers@fh-hagenberg.at>
-SPDX-License-Identifier: Apache-2.0
--->
+<!-- SPDX-FileCopyrightText: 2025-2026 The EDDIE Developers <eddie.developers@fh-hagenberg.at> -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
 <script setup lang="ts">
 import STATUS from '@/constants/permission-status'
 import { computed, onMounted, ref, watch } from 'vue'
 import { fetchPermissions, permissions } from '@/stores/permissions'
-import type { AiidaPermission, PermissionTypes } from '@/types'
+import { fetchInboundProvisioningTypes } from '@/stores/inboundProvisioningTypes.ts'
+import type { AiidaDataNeed, AiidaPermission, PermissionTypes } from '@/types'
 import Button from '@/components/Button.vue'
 import CompleteIcon from '@/assets/icons/CompleteIcon.svg'
 import ActiveIcon from '@/assets/icons/ActiveIcon.svg'
@@ -19,6 +18,11 @@ import { selectedPermissionCategory } from '@/stores/selectedPermissionCategory'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
+const emit = defineEmits<{
+  configureInboundProvisioning: [permission: AiidaPermission]
+  resetInboundServerPassword: [permission: AiidaPermission]
+  resetInboundRestApiKey: [permission: AiidaPermission]
+}>()
 const selectedTab = ref<PermissionTypes>('Active')
 const showMore = ref(false)
 const scrollTarget = ref()
@@ -32,6 +36,7 @@ const activePermissions = ref<AiidaPermission[]>(
 
 onMounted(async () => {
   await fetchPermissions()
+  await fetchInboundProvisioningTypes()
 })
 
 const tabs = [
@@ -65,7 +70,7 @@ watch([selectedTab, permissions, selectedPermissionCategory], () => {
     activePermissions.value = activePermissionCategory.value.filter((p) => STATUS[p.status].isOpen)
   } else {
     activePermissions.value = activePermissionCategory.value.filter(
-      (p) => !STATUS[p.status].isOpen && !STATUS[p.status].isActive,
+      (p) => !STATUS[p.status].isOpen && !STATUS[p.status].isActive && !STATUS[p.status].isFetching,
     )
   }
 })
@@ -96,7 +101,7 @@ const handleShowMore = () => {
   }
 }
 
-const handleCategoryChange = (category: string) => {
+const handleCategoryChange = (category: AiidaDataNeed['type']) => {
   selectedPermissionCategory.value = category
 }
 </script>
@@ -106,15 +111,17 @@ const handleCategoryChange = (category: string) => {
     <UpdatePermissionModal @update="refetchPermissions" />
     <div class="category-tabs">
       <button
-        @click="handleCategoryChange('outbound-aiida')"
-        class="text-normal"
         :class="{ 'active-category': selectedPermissionCategory === 'outbound-aiida' }"
+        type="button"
+        class="text-normal"
+        @click="handleCategoryChange('outbound-aiida')"
       >
         <PermissionsNavIcon class="rotate" /> {{ t('permissions.outboundTab') }}
       </button>
       <button
-        @click="handleCategoryChange('inbound-aiida')"
         :class="{ 'active-category': selectedPermissionCategory === 'inbound-aiida' }"
+        type="button"
+        @click="handleCategoryChange('inbound-aiida')"
         class="text-normal"
       >
         <PermissionsNavIcon /> {{ t('permissions.inboundTab') }}
@@ -138,6 +145,9 @@ const handleCategoryChange = (category: string) => {
           :key="permission.permissionId"
           :permission
           :status="selectedTab"
+          @configure-inbound-provisioning="emit('configureInboundProvisioning', $event)"
+          @reset-inbound-server-password="emit('resetInboundServerPassword', $event)"
+          @reset-inbound-rest-api-key="emit('resetInboundRestApiKey', $event)"
         />
         <Button
           v-if="activePermissions.length > initialPermissionsCount"

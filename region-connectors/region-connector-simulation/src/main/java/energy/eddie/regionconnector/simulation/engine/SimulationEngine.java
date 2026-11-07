@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2024 The EDDIE Developers <eddie.developers@fh-hagenberg.at>
+// SPDX-FileCopyrightText: 2024-2026 The EDDIE Developers <eddie.developers@fh-hagenberg.at>
 // SPDX-License-Identifier: Apache-2.0
 
 package energy.eddie.regionconnector.simulation.engine;
 
-import energy.eddie.dataneeds.services.DataNeedsService;
+import energy.eddie.api.agnostic.data.needs.DataNeedCalculationService;
 import energy.eddie.regionconnector.simulation.dtos.ScenarioMetadata;
 import energy.eddie.regionconnector.simulation.engine.results.SimulationConstraintViolations;
 import energy.eddie.regionconnector.simulation.engine.results.SimulationResult;
@@ -21,25 +21,31 @@ import org.springframework.stereotype.Component;
 public class SimulationEngine {
     private static final Logger LOGGER = LoggerFactory.getLogger(SimulationEngine.class);
     private final DocumentStreams streams;
-    private final DataNeedsService dataNeedsService;
+    private final DataNeedCalculationService calculationService;
 
     public SimulationEngine(
             DocumentStreams streams,
-            @SuppressWarnings("SpringJavaInjectionPointsAutowiringInspection") DataNeedsService dataNeedsService
+            DataNeedCalculationService calculationService
     ) {
         this.streams = streams;
-        this.dataNeedsService = dataNeedsService;
+        this.calculationService = calculationService;
     }
 
     public SimulationResult run(Scenario scenario, ScenarioMetadata metadata) {
-        LOGGER.info("Checking scenario for constraint violations");
+        LOGGER.info("Checking scenario {} with permissionID {} and connectionId {} for constraint violations",
+                    scenario.name(),
+                    metadata.permissionId(),
+                    metadata.connectionId());
         var ctx = createSimulationContext(metadata);
-        var constraints = new SimulationConstraints(scenario, ctx, dataNeedsService);
+        var constraints = new SimulationConstraints(scenario, ctx, calculationService);
         var violations = constraints.violatesConstraints();
         if (!violations.isEmpty()) {
             return new SimulationConstraintViolations(violations);
         }
-        LOGGER.info("Running scenario");
+        LOGGER.info("Running scenario {} with permissionID {} and connectionId {}",
+                    scenario.name(),
+                    metadata.permissionId(),
+                    metadata.connectionId());
         var interpret = new SimulationInterpret(scenario, ctx);
         var thread = Thread.startVirtualThread(interpret::run);
         return new SimulationStarted(thread);
@@ -49,6 +55,8 @@ public class SimulationEngine {
         return new SimulationContext(streams,
                                      metadata.permissionId(),
                                      metadata.connectionId(),
-                                     metadata.dataNeedId());
+                                     metadata.dataNeedId(),
+                                     metadata.creationDateTime(),
+                                     calculationService.calculate(metadata.dataNeedId(), metadata.creationDateTime()));
     }
 }

@@ -31,6 +31,7 @@ dependencies {
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.validation)
+    implementation(libs.spring.boot.starter.mail)
     implementation(libs.spring.boot.starter.data.jpa)
     implementation(libs.spring.boot.starter.webflux)
     implementation(libs.spring.boot.starter.actuator)
@@ -137,7 +138,7 @@ jib {
     to {
         image = System.getProperty("jib.to.image")
         auth {
-            username = System.getProperty("jib.to.auth.username")
+            username = "oauth2accesstoken"
             password = System.getProperty("jib.to.auth.password")
         }
     }

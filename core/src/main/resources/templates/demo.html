@@ -32,6 +32,13 @@
         gap: 1rem;
       }
 
+      fieldset {
+        display: grid;
+        justify-content: start;
+        gap: 0.5rem;
+        padding-bottom: 1rem;
+      }
+
       span + input,
       span + select {
         margin-top: 0.1rem;
@@ -51,8 +58,22 @@
     </p>
     <form>
       <label>
+        <span>Data Need Filter</span>
+        <input
+          aria-controls="data-need-select"
+          aria-label="Data need filter"
+          placeholder="Filter..."
+          type="search"
+        />
+      </label>
+      <label>
         <span>Data need (required)</span>
-        <select autocomplete="off" multiple name="data-need-id"></select>
+        <select
+          autocomplete="off"
+          id="data-need-select"
+          multiple
+          name="data-need-id"
+        ></select>
         <small>
           Multiple data needs can be selected, but not all region connectors
           support multiple data needs.
@@ -63,34 +84,51 @@
         <input type="text" name="connection-id" value="1" />
         <small>For the eligible party to identify generated requests.</small>
       </label>
-      <label>
-        <span>Permission administrator</span>
-        <input type="text" name="permission-administrator" />
-      </label>
-      <label>
-        <span>Accounting point ID</span>
-        <input type="text" name="accounting-point-id" />
-      </label>
-      <label>
-        <span>Customer Identification</span>
-        <input type="text" name="customer-identification" />
-      </label>
-      <label>
-        <span>Meter ID</span>
-        <input type="text" name="meter-id" />
-      </label>
-      <label>
-        <input type="checkbox" name="remember-permission-administrator" />
-        <span>Remember permission administrator</span>
-      </label>
-      <label>
-        <span>Core URL</span>
-        <input type="text" name="core-url" th:value="${publicUrl}" />
-        <small>
-          Overrides the core URL in case your EDDIE instance is not on the same
-          host as the button.
-        </small>
-      </label>
+      <fieldset>
+        <legend>Regional</legend>
+        <label>
+          <span>Permission administrator</span>
+          <input name="permission-administrator" type="text" />
+        </label>
+        <label>
+          <span>Accounting point ID</span>
+          <input name="accounting-point-id" type="text" />
+        </label>
+        <label>
+          <span>Customer Identification</span>
+          <input name="customer-identification" type="text" />
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>AIIDA</legend>
+        <label>
+          <span>Meter ID</span>
+          <input name="meter-id" type="text" />
+        </label>
+        <label>
+          <span>Default Min Limit (kW)</span>
+          <input name="min-limit-kw" type="number" />
+        </label>
+        <label>
+          <span>Default Max Limit (kW)</span>
+          <input name="max-limit-kw" type="number" />
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>Button options</legend>
+        <label>
+          <input type="checkbox" name="remember-permission-administrator" />
+          <span>Remember permission administrator</span>
+        </label>
+        <label>
+          <span>Core URL</span>
+          <input type="text" name="core-url" th:value="${publicUrl}" />
+          <small>
+            Overrides the core URL in case your EDDIE instance is not on the
+            same host as the button.
+          </small>
+        </label>
+      </fieldset>
     </form>
 
     <script type="module">
@@ -99,10 +137,15 @@
        */
       function setAttribute(name, value) {
         const button = document.querySelector("eddie-connect-button");
-        if (value) {
-          button.setAttribute(name, value);
-        } else {
+        if (
+          value === undefined ||
+          value === null ||
+          value === "" ||
+          value === false
+        ) {
           button.removeAttribute(name);
+        } else {
+          button.setAttribute(name, value);
         }
         button.replaceWith(button.cloneNode());
       }
@@ -114,12 +157,6 @@
       const dataNeeds = await fetch(`${coreUrl}/data-needs/api`).then(
         (response) => response.json()
       );
-
-      // Create initial button with first data need
-      const button = document.createElement("eddie-connect-button");
-      button.setAttribute("connection-id", "1");
-      button.setAttribute("data-need-id", dataNeeds[0].id);
-      document.body.prepend(button);
 
       // Populate the select element with data needs
       const select = document.querySelector("select[name='data-need-id']");
@@ -133,6 +170,16 @@
       // Set initial input value for core url field
       document.querySelector("input[name='core-url']").value = coreUrl;
 
+      const filter = document.querySelector("input[type='search']");
+      filter.addEventListener("input", () => {
+        const query = filter.value.toLowerCase();
+        for (const option of select.options) {
+          option.hidden = !(option.textContent + option.value)
+            .toLowerCase()
+            .includes(query);
+        }
+      });
+
       // Update button on data need changes
       select.addEventListener("change", (event) => {
         const { name, options } = event.target;
@@ -143,12 +190,26 @@
         setAttribute(name, ids);
       });
 
+      const inputs = document.querySelectorAll("form input[name]");
+
+      // Create initial button from field values
+      const button = document.createElement("eddie-connect-button");
+      for (const { name, value, type, checked } of inputs) {
+        if (type === "checkbox") {
+          checked && button.setAttribute(name, checked);
+        } else if (value || value === 0) {
+          button.setAttribute(name, value);
+        }
+      }
+
+      button.setAttribute("data-need-id", dataNeeds[0].id);
+      select.options[0].selected = "selected";
+      document.body.prepend(button);
+
       // Update button on input changes
-      const inputs = document.querySelectorAll("input");
       for (const input of inputs) {
         input.addEventListener("input", (event) => {
           const { name, value, type, checked } = event.target;
-          console.log(name, value, checked);
           if (type === "checkbox") {
             setAttribute(name, checked);
           } else {

@@ -24,6 +24,7 @@ Once a permission has been added, it is displayed in the "Inbound Permissions" t
 
 The inbound permission also includes an API key that allows access to inbound data through the REST interface.
 In the information dialog, ready-to-use `curl` command examples can be copied.
+Additionally, MQTT credentials are displayed which may be used to subscribe to a broker's topic.
 
 ## EP: Publishing Inbound Data
 
@@ -32,53 +33,22 @@ The EP can publish data to the respective topic in a desired outbound connector 
 The following schemas are currently supported for inbound data:
 
 - `OPAQUE` (any undefined payload with metadata - see [this documentation](https://architecture.eddie.energy/framework/2-integrating/messages/agnostic.html#opaque-envelopes))
-- `MIN_MAX_ENVELOPE_CIM_V1_12` (min-max envelope in CIM v1.12 format - see [this documentation](https://architecture.eddie.energy/framework/2-integrating/messages/cim/min-max-envelope.html))
+- `MIN-MAX-ENVELOPE-CIM-V1-12` (min-max envelope in CIM v1.12 format - see [this documentation](https://architecture.eddie.energy/framework/2-integrating/messages/cim/min-max-envelope.html))
 
 EDDIE subscribes to these topics and forwards the data to the MQTT broker of the EDDIE instance, where AIIDA subscribes to this topic and receives any data published to it.
-The data is stored in the `inbound_record` database table and can be accessed via a secured REST interface.
+The data is stored in the `inbound_record` database table and can either be accessed via a secured REST interface or via subscribing to a dedicated MQTT topic.
 
 ## Accessing Inbound Data
 
-The REST interface is secured with an **API key** stored in the `data_source` table and shown in the UI. 
-There are two ways to use this key to retrieve the latest inbound record:
+Provisioning defines how AIIDA makes the latest inbound record available to an external system.
+The AIIDA user selects the provisioning mode in the permission details.
+The available modes and the record format are described in [Inbound Provisioning](../../../../2-integrating/inbound-provisioning.md).
 
-> - `{URL_TO_AIIDA}` is the base URL of the AIIDA instance (e.g. `http://192.168.0.12`).
-> - `{PERMISSION_ID}` is the ID of the inbound permission.
-> - `{API_KEY}` is the API key stored in the `data_source` table and shown in the UI.
+## Acknowledgement
 
-1. **Via Query Parameter**
-   ```bash
-   curl {URL_TO_AIIDA}/inbound/latest/{PERMISSION_ID}?apiKey={API_KEY}
-   ```
-2. **Via Header**
-    ```bash
-    curl {URL_TO_AIIDA}/inbound/latest/{PERMISSION_ID} \
-      --header "X-API-Key: {API_KEY}"
-    ```
-   
-### Example Response
-
-```json
-{
-   "timestamp": "2025-10-16T11:39:37.495Z",
-   "userId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-   "dataSourceId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-   "asset": "CONNECTION-AGREEMENT-POINT",
-   "meterId": "123456789",
-   "operatorId": "123456789",
-   "schema": "MIN_MAX_ENVELOPE_CIM_V1_12",
-   "payload": "{\"MessageDocumentHeader\":{..."
-}
-```
-
-## EP: Subscribing to Acknowledgement
-
-AIIDA data needs can be configured to send an acknowledgement back to the EP after receiving data.
-This is done by the flag `acknowledgementRequired` in the data need of the inbound permission.
-
-The EP can subscribe to the respective topic in a desired outbound connector (e.g, in Kafka: `fw.eddie.cim_1_12.acknowledgement-md`).
-
-The received market document MRID is identical to the one sent by the EP, allowing the EP to correlate the acknowledgement with the transmitted data.
+For an inbound permission, AIIDA can send an acknowledgement to the EP after it receives data.
+The EP reads the acknowledgement in an outbound connector.
+See [Acknowledgements](../../../../2-integrating/acknowledgements.md).
 
 ## Revocation
 

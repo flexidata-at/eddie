@@ -6,23 +6,23 @@ AIIDA supports two types of data needs: inbound and outbound. Outbound data need
 
 ## Fields
 
-| Field                       | Type     | Description                                                                                                                                |
-|-----------------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------|
-| `type`                      | String   | Type of the data need, either `outbound-aiida` or `inbound-aiida`.                                                                         |
-| `id`                        | String   | Unique id that can be used to reference this data need.                                                                                    |
-| `name`                      | String   | Short memorable name of the data need that may be presented to the customer.                                                               |
-| `description`               | String   | Multiline string that describes this data need in a human readable form to be shown in the UI.                                             |
-| `purpose`                   | String   | Multiline string that describes the purpose of this data need.                                                                             |
-| `policyLink`                | URL      | URL to the data policy that applies to this data need.                                                                                     |
-| `enabled`                   | boolean  | Enables or disables a data need.                                                                                                           |
-| `duration`                  | Object   | Describes the timeframe for this data need.                                                                                                |
-| `transmissionSchedule`      | String   | Cron expression that defines how often the data should be sent or received.                                                                |
-| `allowedPermissionCommands` | String[] | Permission commands the EP may send to remotely control transmission. See [Permission Commands](#permission-commands). Default `[]`.       |
-| `acknowledgementRequired`   | boolean  | Whether an acknowledgement is required for the data transmission. See [Acknowledgement](#acknowledgement).                                 |
-| `schemas`                   | String[] | [Schemas](./schemas/schemas.md) that define the structure and format of the data, e.g. standardized schemas such as CIM or custom schemas. |
-| `asset`                     | String   | The asset that the data need is associated with, linking the data to specific physical or logical assets.                                  |
-| `dataTags`                  | String[] | Data tags that further specify the type of data that is expected.                                                                          |
-| `contexts`                  | String[] | Contexts for permission request that AIIDA can use to provide additional functionality, e.g. flexible connection agreements.               |
+| Field                       | Type                | Description                                                                                                                                |
+|-----------------------------|---------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| `type`                      | String              | Type of the data need, either `outbound-aiida` or `inbound-aiida`.                                                                         |
+| `id`                        | String              | Unique id that can be used to reference this data need.                                                                                    |
+| `name`                      | String              | Short memorable name of the data need that may be presented to the customer.                                                               |
+| `description`               | String              | Multiline string that describes this data need in a human readable form to be shown in the UI.                                             |
+| `purpose`                   | String              | Multiline string that describes the purpose of this data need.                                                                             |
+| `policyLink`                | URL                 | URL to the data policy that applies to this data need.                                                                                     |
+| `enabled`                   | boolean             | Enables or disables a data need.                                                                                                           |
+| `duration`                  | Object              | Describes the timeframe for this data need.                                                                                                |
+| `transmissionSchedule`      | String              | Cron expression that defines how often the data should be sent or received.                                                                |
+| `allowedPermissionCommands` | String[]            | Permission commands the EP may send to update an existing permission. See [Permission Commands](#permission-commands). Default `[]`.       |
+| `acknowledgementRequired`   | boolean             | Whether an acknowledgement is required for the data transmission. See [Acknowledgement](#acknowledgement).                                 |
+| `schemas`                   | String[]            | [Schemas](./schemas/schemas.md) that define the structure and format of the data, e.g. standardized schemas such as CIM or custom schemas. |
+| `asset`                     | String              | The asset that the data need is associated with, linking the data to specific physical or logical assets.                                  |
+| `dataTags`                  | String[] (optional) | Data tags further specify the type of data expected. If omitted, it is assumed that all available data is included.                        |
+| `contexts`                  | String[]            | Contexts for permission request that AIIDA can use to provide additional functionality, e.g. flexible connection agreements.               |
 
 ## Outbound
 
@@ -104,8 +104,8 @@ The acknowledgement is available in the outbound connector being used.
 
 For more details, see:
 
+- [Subscribing to Acknowledgements](../2-integrating/acknowledgements.md)
 - [Acknowledgement Market Document](https://architecture.eddie.energy/framework/2-integrating/messages/cim/acknowledgement-market-documents.html#acknowledgement-market-document)
-- [EP Subscribing to Acknowledgement](https://architecture.eddie.energy/aiida/1-running/data-sources/mqtt/inbound/inbound-data-source.html#ep-subscribing-to-acknowledgement)
 
 ## Permission Commands
 
@@ -115,7 +115,8 @@ The available commands are:
 
 - `SET_TRANSMISSION_ENABLED` - enables or disables transmission.
 - `UPDATE_TRANSMISSION_SCHEDULE` - adjusts the transmission schedule (capped at the data-need frequency).
+- `UPDATE_LIMIT_DEFAULTS` - adjusts the default upper and lower production or consumption limits for limit permissions.
 
 For example, `"allowedPermissionCommands": ["UPDATE_TRANSMISSION_SCHEDULE", "SET_TRANSMISSION_ENABLED"]` allows both commands.
-If the field is empty (the default `[]`), all transmission-controlling commands are rejected. The `TERMINATE`
-command is always accepted, regardless of this field.
+If the field is empty (the default `[]`), all transmission-controlling commands are rejected.
+The `TERMINATE` command is always accepted, regardless of this field.
