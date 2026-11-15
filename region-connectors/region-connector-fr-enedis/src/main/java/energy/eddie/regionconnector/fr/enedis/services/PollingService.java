@@ -135,8 +135,10 @@ public class PollingService implements CommonPollingService<FrEnedisPermissionRe
         // A missing interval is not a revoked consent; an access/technical error
         // must not be hidden by a successful later batch.
         if (incompleteFetch || (latest != null && noData != null)) {
-            LOGGER.warn("ENEDIS has unavailable intervals of permission '{}'; keeping available data and permission for retry",
-                        permissionRequest.permissionId());
+            if (LOGGER.isWarnEnabled()) {
+                LOGGER.warn("ENEDIS has unavailable intervals of permission '{}'; keeping available data and permission for retry",
+                            permissionRequest.permissionId());
+            }
         } else if (latest != null) {
             meterReadingPermissionUpdateAndFulfillmentService.tryUpdateAndFulfillPermissionRequest(permissionRequest, latest);
         } else if (noData != null) {
