@@ -110,7 +110,7 @@ public class CesuManagementController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "An Austrian accounting point and a participation factor from 1 to 100 are required");
         }
         var direction = energyDirection(accountingPoint.getEnergySharingEnergyDirection());
-        if (request.permissionAdministratorId() == null || !request.permissionAdministratorId().matches("AT[0-9]{6}")) {
+        if (request.permissionAdministratorId() == null || !request.permissionAdministratorId().matches("AT\\d{6}")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "An Austrian permission administrator ID is required");
         }
         var participationFactor = factor.intValueExact();

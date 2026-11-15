@@ -29,6 +29,7 @@ import energy.eddie.regionconnector.at.eda.services.IdentifiableConsumptionRecor
 import energy.eddie.regionconnector.at.eda.services.IdentifiableMasterDataService;
 import energy.eddie.regionconnector.at.eda.tasks.IdentifyECMPListTask;
 import energy.eddie.regionconnector.shared.cim.v0_82.TransmissionScheduleProvider;
+import energy.eddie.regionconnector.shared.cim.IntermediatePermissionMarketDocumentFactory;
 import energy.eddie.regionconnector.shared.event.sourcing.EventBus;
 import energy.eddie.regionconnector.shared.event.sourcing.EventBusImpl;
 import energy.eddie.regionconnector.shared.event.sourcing.Outbox;
@@ -146,13 +147,13 @@ public class AtEdaBeanConfig {
             AtConfiguration atConfig,
             @SuppressWarnings("SpringJavaInjectionPointsAutowiringInspection") CommonInformationModelConfiguration cimConfig
     ) {
+        var documentFactory = new IntermediatePermissionMarketDocumentFactory<AtPermissionRequest>(
+                atConfig.eligiblePartyId(), pr -> TRANSMISSION_CYCLE.name(),
+                cimConfig.eligiblePartyNationalCodingScheme().value(), AT_ZONE_ID);
         return new PermissionMarketDocumentMessageHandler<>(eventBus,
                                                             repository,
                                                             dataNeedsService,
-                                                            atConfig.eligiblePartyId(),
-                                                            cimConfig,
-                                                            pr -> TRANSMISSION_CYCLE.name(),
-                                                            AT_ZONE_ID,
+                                                            documentFactory,
                                                             () -> repository.findByStatusIn(
                                                                     EnumSet.allOf(PermissionProcessStatus.class)
                                                             ));

@@ -49,29 +49,22 @@ public class PermissionMarketDocumentMessageHandler<T extends PermissionRequest>
             TransmissionScheduleProvider<T> transmissionScheduleProvider,
             ZoneId zoneId
     ) {
-        this(eventBus, repository, dataNeedsService, eligiblePartyId, cimConfig,
-                transmissionScheduleProvider, zoneId, List::of);
+        this(eventBus, repository, dataNeedsService,
+                new IntermediatePermissionMarketDocumentFactory<>(eligiblePartyId, transmissionScheduleProvider,
+                        cimConfig.eligiblePartyNationalCodingScheme().value(), zoneId), List::of);
     }
 
     public PermissionMarketDocumentMessageHandler(
             EventBus eventBus,
             PermissionRequestRepository<T> repository,
             DataNeedsService dataNeedsService,
-            String eligiblePartyId,
-            CommonInformationModelConfiguration cimConfig,
-            TransmissionScheduleProvider<T> transmissionScheduleProvider,
-            ZoneId zoneId,
+            IntermediatePermissionMarketDocumentFactory<T> permissionMarketDocumentFactory,
             Supplier<? extends Iterable<T>> initialRequests
     ) {
         this.repository = repository;
         this.dataNeedsService = dataNeedsService;
         this.initialRequests = initialRequests;
-        this.permissionMarketDocumentFactory = new IntermediatePermissionMarketDocumentFactory<>(
-                eligiblePartyId,
-                transmissionScheduleProvider,
-                cimConfig.eligiblePartyNationalCodingScheme().value(),
-                zoneId
-        );
+        this.permissionMarketDocumentFactory = permissionMarketDocumentFactory;
         eventBus.filteredFlux(PermissionEvent.class)
                 .subscribe(this::accept);
     }

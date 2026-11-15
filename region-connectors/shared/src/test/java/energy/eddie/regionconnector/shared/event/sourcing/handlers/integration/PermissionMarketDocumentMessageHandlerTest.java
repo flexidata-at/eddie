@@ -10,6 +10,7 @@ import energy.eddie.cim.agnostic.PermissionProcessStatus;
 import energy.eddie.cim.v0_82.vhd.CodingSchemeTypeList;
 import energy.eddie.dataneeds.needs.AccountingPointDataNeed;
 import energy.eddie.dataneeds.services.DataNeedsService;
+import energy.eddie.regionconnector.shared.cim.IntermediatePermissionMarketDocumentFactory;
 import energy.eddie.regionconnector.shared.event.sourcing.EventBus;
 import energy.eddie.regionconnector.shared.event.sourcing.EventBusImpl;
 import energy.eddie.regionconnector.shared.exceptions.PermissionNotFoundException;
@@ -133,15 +134,23 @@ class PermissionMarketDocumentMessageHandlerTest {
         when(dataNeedsService.getById("dnid")).thenReturn(new AccountingPointDataNeed());
         var cimConfig = new PlainCommonInformationModelConfiguration(
                 CodingSchemeTypeList.AUSTRIA_NATIONAL_CODING_SCHEME, "fallbackId");
+        var documentFactory = new IntermediatePermissionMarketDocumentFactory<PermissionRequest>("EP-ID", pr -> null,
+                cimConfig.eligiblePartyNationalCodingScheme().value(), ZoneOffset.UTC);
+        var replayQueries = new AtomicInteger();
         var handler = new PermissionMarketDocumentMessageHandler<>(new EventBusImpl(), repository,
-                dataNeedsService, "EP-ID", cimConfig, pr -> null, ZoneOffset.UTC, () -> List.of(permission));
+                dataNeedsService, documentFactory, () -> {
+                    replayQueries.incrementAndGet();
+                    return List.of(permission);
+                });
 
+        assertEquals(0, replayQueries.get());
         StepVerifier.create(handler.getPermissionMarketDocumentStream().take(1))
                 .expectNextCount(1)
                 .verifyComplete();
         StepVerifier.create(handler.getRequestPermissionDocumentStream().take(1))
                 .expectNextCount(1)
                 .verifyComplete();
+        assertEquals(2, replayQueries.get());
     }
 
     @Test

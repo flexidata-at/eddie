@@ -24,6 +24,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDate;
+import java.time.Month;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -48,7 +49,7 @@ class PollingFailureIntegrationTest {
             var outbox = mock(Outbox.class);
             var calculation = mock(DataNeedCalculationService.class);
             var fulfillment = mock(MeterReadingPermissionUpdateAndFulfillmentService.class);
-            var start = LocalDate.of(2026, 8, 14);
+            var start = LocalDate.of(2026, Month.AUGUST, 14);
             var end = start;
             var timeframe = new Timeframe(start, end);
             when(calculation.calculate(eq("data-need"), any())).thenReturn(
@@ -59,7 +60,7 @@ class PollingFailureIntegrationTest {
                     .setPermissionId("permission-id").setDataNeedId("data-need")
                     .setStart(start).setEnd(end).setGranularity(Granularity.PT30M)
                     .setUsagePointId("test-meter").setStatus(PermissionProcessStatus.ACCEPTED).create();
-            var polling = new PollingService(client, fulfillment, outbox,
+            var polling = new PollingService(client, fulfillment,
                     new UpdateGranularityTask(outbox, calculation), streams);
 
             polling.pollTimeSeriesData(request);

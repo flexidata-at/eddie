@@ -9,7 +9,6 @@ import energy.eddie.regionconnector.fr.enedis.dto.EnedisApiError;
 import energy.eddie.regionconnector.fr.enedis.providers.IdentifiableMeterReading;
 import energy.eddie.regionconnector.fr.enedis.providers.MeterReadingType;
 import energy.eddie.regionconnector.fr.enedis.tasks.UpdateGranularityTask;
-import energy.eddie.regionconnector.shared.event.sourcing.Outbox;
 import energy.eddie.regionconnector.shared.services.CommonPollingService;
 import energy.eddie.regionconnector.shared.services.MeterReadingPermissionUpdateAndFulfillmentService;
 import org.slf4j.Logger;
@@ -44,7 +43,6 @@ public class PollingService implements CommonPollingService<FrEnedisPermissionRe
     public PollingService(
             EnedisMeterReadingApi enedisApi,
             MeterReadingPermissionUpdateAndFulfillmentService meterReadingPermissionUpdateAndFulfillmentService,
-            Outbox outbox,
             UpdateGranularityTask updateGranularityTask,
             EnergyDataStreams streams
     ) {
@@ -112,29 +110,38 @@ public class PollingService implements CommonPollingService<FrEnedisPermissionRe
         // never release the lock belonging to that new subscription in doFinally.
         readings.doOnComplete(() -> inFlight.remove(permissionId, pollingRun))
                 .doFinally(ignored -> inFlight.remove(permissionId, pollingRun))
-                .subscribe(reading -> {
-                    // Empty responses must not masquerade as delivered data or fulfillment.
-                    if (reading.payload().readings().stream().allMatch(value -> value.points().isEmpty())) {
-                        incompleteFetch.set(true);
-                        return;
-                    }
-                    latest.updateAndGet(previous -> previous == null
-                            || reading.meterReadingEndDate().isAfter(previous.meterReadingEndDate()) ? reading : previous);
-                    streams.publish(reading);
-                }, error -> LOGGER.warn("ENEDIS fetch incomplete for permission '{}'; preserving delivered readings and permission for retry",
-                                        permissionId, error), () -> {
-                    // Only decide fulfillment once ALL batches/directions have completed.
-                    // A missing interval is not a revoked consent; an access/technical error
-                    // must not be hidden by a successful later batch.
-                    if (incompleteFetch.get() || (latest.get() != null && noData.get() != null)) {
-                        LOGGER.warn("ENEDIS has unavailable intervals of permission '{}'; keeping available data and permission for retry", permissionId);
-                    } else if (latest.get() != null) {
-                        meterReadingPermissionUpdateAndFulfillmentService.tryUpdateAndFulfillPermissionRequest(
-                                permissionRequest, latest.get());
-                    } else if (noData.get() != null) {
-                        updateGranularityTask.update(permissionRequest, noData.get());
-                    }
-                });
+                .subscribe(reading -> publishAvailableReading(reading, incompleteFetch, latest),
+                           error -> LOGGER.warn("ENEDIS fetch incomplete for permission '{}'; preserving delivered readings and permission for retry",
+                                                permissionId, error),
+                           () -> completeFetch(permissionRequest, incompleteFetch.get(), latest.get(), noData.get()));
+    }
+
+    private void publishAvailableReading(IdentifiableMeterReading reading, AtomicBoolean incompleteFetch,
+                                         AtomicReference<IdentifiableMeterReading> latest) {
+        // Empty responses must not masquerade as delivered data or fulfillment.
+        if (reading.payload().readings().stream().allMatch(value -> value.points().isEmpty())) {
+            incompleteFetch.set(true);
+            return;
+        }
+        latest.updateAndGet(previous -> previous == null
+                || reading.meterReadingEndDate().isAfter(previous.meterReadingEndDate()) ? reading : previous);
+        streams.publish(reading);
+    }
+
+    private void completeFetch(FrEnedisPermissionRequest permissionRequest, boolean incompleteFetch,
+                               @org.jspecify.annotations.Nullable IdentifiableMeterReading latest,
+                               @org.jspecify.annotations.Nullable Throwable noData) {
+        // Only decide fulfillment once ALL batches/directions have completed.
+        // A missing interval is not a revoked consent; an access/technical error
+        // must not be hidden by a successful later batch.
+        if (incompleteFetch || (latest != null && noData != null)) {
+            LOGGER.warn("ENEDIS has unavailable intervals of permission '{}'; keeping available data and permission for retry",
+                        permissionRequest.permissionId());
+        } else if (latest != null) {
+            meterReadingPermissionUpdateAndFulfillmentService.tryUpdateAndFulfillPermissionRequest(permissionRequest, latest);
+        } else if (noData != null) {
+            updateGranularityTask.update(permissionRequest, noData);
+        }
     }
 
     private Flux<IdentifiableMeterReading> fetchAvailableData(

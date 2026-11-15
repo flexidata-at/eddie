@@ -58,7 +58,7 @@ class PollingServiceTest {
                 (pr, end) -> {}
         );
         EnergyDataStreams streams = new EnergyDataStreams();
-        PollingService pollingService = new PollingService(enedisApi, service, outbox, updateGranularityTask, streams);
+        PollingService pollingService = new PollingService(enedisApi, service, updateGranularityTask, streams);
         LocalDate start = LocalDate.now(ZoneOffset.UTC).minusDays(20);
         LocalDate end = LocalDate.now(ZoneOffset.UTC).minusDays(10);
         FrEnedisPermissionRequest request = new EnedisPermissionRequestBuilder()
@@ -93,7 +93,7 @@ class PollingServiceTest {
                 (pr, end) -> {}
         );
         EnergyDataStreams streams = new EnergyDataStreams();
-        PollingService pollingService = new PollingService(enedisApi, service, outbox, updateGranularityTask, streams);
+        PollingService pollingService = new PollingService(enedisApi, service, updateGranularityTask, streams);
         LocalDate start = LocalDate.now(ZoneOffset.UTC).minusDays(20);
         LocalDate end = LocalDate.now(ZoneOffset.UTC).minusDays(10);
         FrEnedisPermissionRequest request = new EnedisPermissionRequestBuilder()
@@ -148,7 +148,7 @@ class PollingServiceTest {
                 (pr, end) -> {}
         );
         EnergyDataStreams streams = new EnergyDataStreams();
-        PollingService pollingService = new PollingService(enedisApi, service, outbox, updateGranularityTask, streams);
+        PollingService pollingService = new PollingService(enedisApi, service, updateGranularityTask, streams);
         LocalDate start = LocalDate.now(ZoneOffset.UTC).minusDays(10);
         LocalDate end = LocalDate.now(ZoneOffset.UTC).minusDays(10);
         FrEnedisPermissionRequest request = new EnedisPermissionRequestBuilder()
@@ -182,7 +182,7 @@ class PollingServiceTest {
                 (pr, end) -> {}
         );
         EnergyDataStreams streams = new EnergyDataStreams();
-        PollingService pollingService = new PollingService(enedisApi, service, outbox, updateGranularityTask, streams);
+        PollingService pollingService = new PollingService(enedisApi, service, updateGranularityTask, streams);
         LocalDate start = LocalDate.now(ZoneOffset.UTC).minusDays(20);
         LocalDate end = LocalDate.now(ZoneOffset.UTC).minusDays(10);
         FrEnedisPermissionRequest request = new EnedisPermissionRequestBuilder()
@@ -210,7 +210,7 @@ class PollingServiceTest {
                 (pr, end) -> {}
         );
         EnergyDataStreams streams = new EnergyDataStreams();
-        PollingService pollingService = new PollingService(enedisApi, service, outbox, updateGranularityTask, streams);
+        PollingService pollingService = new PollingService(enedisApi, service, updateGranularityTask, streams);
         LocalDate start = LocalDate.now(ZoneOffset.UTC).minusDays(20);
         LocalDate end = LocalDate.now(ZoneOffset.UTC).minusDays(10);
         FrEnedisPermissionRequest request = new EnedisPermissionRequestBuilder()
@@ -243,7 +243,7 @@ class PollingServiceTest {
                 (pr, end) -> {}
         );
         EnergyDataStreams streams = new EnergyDataStreams();
-        PollingService pollingService = new PollingService(enedisApi, service, outbox, updateGranularityTask, streams);
+        PollingService pollingService = new PollingService(enedisApi, service, updateGranularityTask, streams);
         LocalDate start = LocalDate.now(ZoneOffset.UTC).minusDays(2);
         LocalDate end = LocalDate.now(ZoneOffset.UTC).minusDays(1);
         FrEnedisPermissionRequest request = new EnedisPermissionRequestBuilder()
@@ -276,7 +276,7 @@ class PollingServiceTest {
                 (pr, end) -> {}
         );
         EnergyDataStreams streams = new EnergyDataStreams();
-        PollingService pollingService = new PollingService(enedisApi, service, outbox, updateGranularityTask, streams);
+        PollingService pollingService = new PollingService(enedisApi, service, updateGranularityTask, streams);
         LocalDate start = LocalDate.now(ZoneOffset.UTC).minusDays(20);
         LocalDate end = LocalDate.now(ZoneOffset.UTC).minusDays(10);
         FrEnedisPermissionRequest request = new EnedisPermissionRequestBuilder()
@@ -311,7 +311,7 @@ class PollingServiceTest {
                 (pr, end) -> {}
         );
         EnergyDataStreams streams = new EnergyDataStreams();
-        PollingService pollingService = new PollingService(enedisApi, service, outbox, updateGranularityTask, streams);
+        PollingService pollingService = new PollingService(enedisApi, service, updateGranularityTask, streams);
         LocalDate start = LocalDate.now(ZoneOffset.UTC).minusDays(20);
         LocalDate end = LocalDate.now(ZoneOffset.UTC).minusDays(10);
         FrEnedisPermissionRequest request = new EnedisPermissionRequestBuilder()

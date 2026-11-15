@@ -19,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.time.Month;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -107,10 +108,10 @@ class DuplicateDataFilterTest {
 
     @Test
     void preservesCorrectionsForPreviouslyReceivedCommunityAllocationPeriods() {
-        var record = mock(EdaConsumptionRecord.class);
-        when(record.energyCommunityId()).thenReturn(Optional.of("community"));
-        var identified = new IdentifiableConsumptionRecord(record, List.of(createPermissionRequest()),
-                LocalDate.of(2024, 1, 1), LocalDate.of(2024, 1, 10));
+        var consumptionRecord = mock(EdaConsumptionRecord.class);
+        when(consumptionRecord.energyCommunityId()).thenReturn(Optional.of("community"));
+        var identified = new IdentifiableConsumptionRecord(consumptionRecord, List.of(createPermissionRequest()),
+                LocalDate.of(2024, Month.JANUARY, 1), LocalDate.of(2024, Month.JANUARY, 10));
 
         assertThat(filter.apply(identified)).isSameAs(identified);
         verifyNoInteractions(repository);
