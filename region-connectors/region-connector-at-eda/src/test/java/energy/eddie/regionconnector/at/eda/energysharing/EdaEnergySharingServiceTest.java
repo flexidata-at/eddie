@@ -3,11 +3,15 @@
 package energy.eddie.regionconnector.at.eda.energysharing;
 
 import energy.eddie.api.agnostic.energysharing.*;
+import de.ponton.xp.adapter.api.messages.OutboundMessage;
+import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
 import energy.eddie.regionconnector.at.eda.persistence.EnergySharingRecord;
 import energy.eddie.regionconnector.at.eda.ponton.messenger.MessengerStatus;
 import energy.eddie.regionconnector.at.eda.ponton.messenger.PontonMessengerConnection;
+import energy.eddie.regionconnector.at.eda.requests.EdaGroupingIdFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -15,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
 import java.util.function.UnaryOperator;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -34,6 +39,8 @@ class EdaEnergySharingServiceTest {
     private final PontonMessengerConnection transport = mock(PontonMessengerConnection.class);
     private final Map<String, EnergySharingRecord> records = new LinkedHashMap<>();
     private final MovingClock clock = new MovingClock();
+    private final EdaGroupingIdFactory groupingIds =
+            new EdaGroupingIdFactory(new AtConfiguration("EP100022", null, "DATADEV"));
     private EdaEnergySharingService service;
 
     @BeforeEach
@@ -49,15 +56,15 @@ class EdaEnergySharingServiceTest {
             return null;
         }).when(store).insert(any());
         doAnswer(call -> {
-            var record = Objects.requireNonNull(records.get(call.getArgument(0)));
+            var row = Objects.requireNonNull(records.get(call.getArgument(0)));
             UnaryOperator<String> update = call.getArgument(1);
-            record.payload(update.apply(record.payload()));
+            row.payload(update.apply(row.payload()));
             return null;
         }).when(store).update(anyString(), any());
         when(transport.supportsEnergySharing()).thenReturn(true);
         when(transport.messengerStatus()).thenReturn(new MessengerStatus(Map.of(), true));
         var binding = new EdaEnergySharingConfiguration.Binding(CONNECTION, OPERATOR, Map.of(EC, DSO), true);
-        service = new EdaEnergySharingService(new EdaEnergySharingConfiguration(List.of(binding)), store, transport, mapper, clock);
+        service = new EdaEnergySharingService(new EdaEnergySharingConfiguration(List.of(binding)), store, transport, mapper, groupingIds, clock);
     }
 
     @Test
@@ -66,8 +73,9 @@ class EdaEnergySharingServiceTest {
                 "SYNC_MASTER_DATA", EdaEnergySharingXml.VERSION, mapper.createObjectNode());
         assertEquals(EnergySharingException.Code.FORBIDDEN,
                 assertThrows(EnergySharingException.class, () -> service.submit(foreign)).code());
-        assertThrows(EnergySharingException.class, () -> service.submit(request("invalid", "SYNC_MASTER_DATA",
-                mapper.createObjectNode().put("unmappedParameter", "must not disappear"))));
+        var invalid = request("invalid", "SYNC_MASTER_DATA",
+                mapper.createObjectNode().put("unmappedParameter", "must not disappear"));
+        assertThrows(EnergySharingException.class, () -> service.submit(invalid));
         assertTrue(records.isEmpty());
         verify(transport, never()).sendEnergySharing(any());
     }
@@ -87,12 +95,160 @@ class EdaEnergySharingServiceTest {
     }
 
     @Test
+    void sharedMessengerRoutingPrefixPreservesWireCorrelationAndTenantScope() throws Exception {
+        var first = service.submit(request("routed-one", "SYNC_MASTER_DATA", mapper.createObjectNode()));
+        var second = service.submit(request("routed-two", "SYNC_MASTER_DATA", mapper.createObjectNode()));
+        assertNotEquals(first.marketMessageId(), second.marketMessageId());
+        var messages = ArgumentCaptor.forClass(OutboundMessage.class);
+        verify(transport, times(2)).sendEnergySharing(messages.capture());
+        var operations = List.of(first, second);
+        for (int index = 0; index < operations.size(); index++) {
+            var operation = operations.get(index);
+            var id = Objects.requireNonNull(operation.marketMessageId());
+            assertTrue(id.startsWith("DATADEV"));
+            assertTrue(id.matches("[0-9A-Za-z]{1,35}"));
+            var xml = messages.getAllValues().get(index).getInputStream().readAllBytes();
+            EdaEnergySharingXml.validate(xml, "CPRequest_01p12.xsd");
+            var document = EdaEnergySharingXml.parse(xml);
+            assertEquals(id, document.getElementsByTagNameNS(COMMON, "ConversationId").item(0).getTextContent());
+            assertEquals(id, document.getElementsByTagNameNS(COMMON, "MessageId").item(0).getTextContent());
+        }
+        assertTrue(service.receive("SENDEN_ECP", list(first.marketMessageId(), "RoutedReply", "SENDEN_ECP", "", DSO)));
+        assertEquals("COMPLETED", service.operation("routed-one", CONNECTION, OPERATOR, EC).orElseThrow().status());
+        assertEquals("SUBMITTED", service.operation("routed-two", CONNECTION, OPERATOR, EC).orElseThrow().status());
+        assertFalse(service.receive("SENDEN_ECP", list("DATADEVUnknownConversation", "UnownedReply", "SENDEN_ECP", "", DSO)));
+        assertThrows(EnergySharingException.class,
+                () -> service.operation("routed-one", "another-application", OPERATOR, EC));
+    }
+
+    @Test
     void uncertainTransportIsRetainedAndNeverBlindlyResent() throws Exception {
         doThrow(new IllegalStateException("Lost transport acknowledgement")).when(transport).sendEnergySharing(any());
         var request = request("uncertain", "SYNC_MASTER_DATA", mapper.createObjectNode());
         assertEquals("RECONCILIATION_REQUIRED", service.submit(request).status());
         assertEquals("RECONCILIATION_REQUIRED", service.submit(request).status());
         verify(transport, times(1)).sendEnergySharing(any());
+    }
+
+    @Test
+    void missingPartnerAndTransportSetupNeverDispatchesMarketRequests() throws Exception {
+        service = configuredService(Map.of(), false);
+        when(transport.supportsEnergySharing()).thenReturn(false);
+        var capability = service.capabilities(OPERATOR, CONNECTION);
+        assertFalse(capability.transportReady());
+        assertTrue(capability.setupSteps().stream().anyMatch(step -> step.contains("EC_LIST")));
+        assertTrue(capability.setupSteps().stream().anyMatch(step -> step.contains("X/P")));
+        assertTrue(capability.setupSteps().stream().anyMatch(step -> step.contains("REST")));
+        var command = request("not-ready", "SYNC_MASTER_DATA", mapper.createObjectNode());
+        assertEquals(EnergySharingException.Code.NOT_READY,
+                assertThrows(EnergySharingException.class, () -> service.submit(command)).code());
+        service = configuredService(Map.of(EC, DSO), true);
+        when(transport.supportsEnergySharing()).thenReturn(true);
+        when(transport.messengerStatus()).thenReturn(new MessengerStatus(Map.of(), false));
+        assertFalse(service.capabilities(OPERATOR, CONNECTION).transportReady());
+        assertTrue(service.capabilities(OPERATOR, CONNECTION).setupSteps().getFirst().contains("Restore"));
+        assertTrue(records.isEmpty());
+        verify(transport, never()).sendEnergySharing(any());
+    }
+
+    @Test
+    void staleProfilesUnsupportedOperationsAndWrongDsoAreRejectedBeforeDispatch() throws Exception {
+        var oldProfile = new EnergySharingRequest("old-profile", CONNECTION, OPERATOR, EC, "SYNC_MASTER_DATA", "obsolete", mapper.createObjectNode());
+        var unsupported = request("unsupported", "SETTLE_TRADE", mapper.createObjectNode());
+        var wrongDso = request("wrong-dso", "SYNC_MASTER_DATA", mapper.createObjectNode().put("permissionAdministratorId", "AT002000"));
+        assertEquals(EnergySharingException.Code.INVALID_REQUEST,
+                assertThrows(EnergySharingException.class, () -> service.submit(oldProfile)).code());
+        assertEquals(EnergySharingException.Code.UNSUPPORTED,
+                assertThrows(EnergySharingException.class, () -> service.submit(unsupported)).code());
+        assertEquals(EnergySharingException.Code.FORBIDDEN,
+                assertThrows(EnergySharingException.class, () -> service.submit(wrongDso)).code());
+        verify(transport, never()).sendEnergySharing(any());
+        assertTrue(records.isEmpty());
+    }
+
+    @Test
+    void configuredCommunityFanoutWaitsForEveryChildAndReplayDoesNotResend() throws Exception {
+        String secondCommunity = "AT0000000000000000000000000000009";
+        service = configuredService(Map.of(EC, DSO, secondCommunity, DSO), true);
+        var group = groupRequest("group");
+        var submitted = service.submit(group);
+        assertEquals(2, submitted.result().path("children").size());
+        assertEquals(2, submitted.result().path("operations").size());
+        var first = service.operation("group-1", CONNECTION, OPERATOR, EC).orElseThrow();
+        var second = service.operation("group-2", CONNECTION, OPERATOR, secondCommunity).orElseThrow();
+        assertTrue(service.receive("SENDEN_ECP", list(first.marketMessageId(), "FirstCommunity", "SENDEN_ECP", "", DSO)));
+        assertEquals("SUBMITTED", service.operation("group", CONNECTION, OPERATOR, "").orElseThrow().status());
+        var secondReply = new String(list(second.marketMessageId(), "SecondCommunity", "SENDEN_ECP", "", DSO), StandardCharsets.UTF_8)
+                .replace(EC, secondCommunity).getBytes(StandardCharsets.UTF_8);
+        assertTrue(service.receive("SENDEN_ECP", secondReply));
+        assertEquals("COMPLETED", service.submit(group).status());
+        assertEquals(2, service.communities(OPERATOR, CONNECTION).size());
+        verify(transport, times(2)).sendEnergySharing(any());
+    }
+
+    @Test
+    void groupedQueryReplayRecoversOnlyAChildThatWasNeverPersisted() throws Exception {
+        String secondCommunity = "AT0000000000000000000000000000009";
+        service = configuredService(Map.of(EC, DSO, secondCommunity, DSO), true);
+        var firstAttempt = new AtomicBoolean(true);
+        doAnswer(call -> {
+            EnergySharingRecord row = call.getArgument(0);
+            var id = mapper.readTree(row.payload()).path("request").path("requestId").asText();
+            if (id.equals("recover-2") && firstAttempt.getAndSet(false))
+                throw new IllegalStateException("Simulated child persistence interruption");
+            if (records.putIfAbsent(row.id(), row) != null) throw new IllegalStateException("Duplicate durable key");
+            return null;
+        }).when(store).insert(any());
+        var group = groupRequest("recover");
+        assertEquals("RECONCILIATION_REQUIRED", service.submit(group).status());
+        assertTrue(service.operation("recover-2", CONNECTION, OPERATOR, secondCommunity).isEmpty());
+        assertEquals(2, service.submit(group).result().path("operations").size());
+        verify(transport, times(2)).sendEnergySharing(any());
+        var rejected = service.operation("recover-2", CONNECTION, OPERATOR, secondCommunity).orElseThrow();
+        assertTrue(service.receive("ABLEHNUNG_ECP", processNotification(rejected.marketMessageId(), "RejectedChild", "ABLEHNUNG_ECP", 188)));
+        assertEquals("RECONCILIATION_REQUIRED", service.operation("recover", CONNECTION, OPERATOR, "").orElseThrow().status());
+        assertEquals("REJECTED", service.operation("recover-2", CONNECTION, OPERATOR, secondCommunity).orElseThrow().status());
+    }
+
+    @Test
+    void transportCallbacksReconcilePendingRequestsButNeverRegressCompletedOnes() {
+        var captured = ArgumentCaptor.forClass(EnergySharingMessageHandler.class);
+        verify(transport).withEnergySharingHandler(captured.capture());
+        var handler = captured.getValue();
+        var submitted = query("callback", "2026-01-01", "2026-12-31");
+        assertTrue(handler.accepts("SENDEN_ECP"));
+        assertTrue(handler.accepts("AUFHEBUNG_CCMI"));
+        assertFalse(handler.accepts("UNRELATED"));
+        handler.transportStatus("unknown", "FAILED");
+        handler.transportStatus(submitted.marketMessageId(), "SUCCESS");
+        assertEquals("SUBMITTED", operation("callback").status());
+        handler.transportStatus(submitted.marketMessageId(), "TRANSMISSION_ERROR");
+        assertEquals("RECONCILIATION_REQUIRED", operation("callback").status());
+        assertTrue(handler.handle("SENDEN_ECP", list(submitted.marketMessageId(), "CallbackSnapshot", "SENDEN_ECP", "", DSO)));
+        assertEquals("COMPLETED", operation("callback").status());
+        handler.transportStatus(submitted.marketMessageId(), "FAILED");
+        assertEquals("COMPLETED", operation("callback").status());
+    }
+
+    @Test
+    void allocationChangeRequiresAnAuthoritativeStaticCommunity() throws Exception {
+        var parameters = mapper.createObjectNode().put("meteringPointId", METER).put("start", "2026-11-16").put("distributionModel", "S");
+        parameters.putArray("timePeriods").addObject().put("start", "2026-11-16").put("end", "2026-12-31")
+                .put("activate", "2026-01-01").put("dataType", "EnergyCommunityRegistration").put("allocationFactor", 25.125);
+        var change = request("static-allocation", "CHANGE_ALLOCATION", parameters);
+        assertEquals(EnergySharingException.Code.INVALID_REQUEST,
+                assertThrows(EnergySharingException.class, () -> service.submit(change)).code());
+        seedAnnualRoster();
+        assertEquals(EnergySharingException.Code.INVALID_REQUEST,
+                assertThrows(EnergySharingException.class, () -> service.submit(change)).code());
+        clock.advance();
+        var sync = query("static-roster", "2026-01-01", "2026-12-31");
+        var staticReply = new String(list(sync.marketMessageId(), "StaticSnapshot", "SENDEN_ECP",
+                member(METER, period("2026-01-01", "2026-12-31", 50)), DSO), StandardCharsets.UTF_8)
+                .replace("<cp:ECDisModel>D</cp:ECDisModel>", "<cp:ECDisModel>S</cp:ECDisModel>").getBytes(StandardCharsets.UTF_8);
+        assertTrue(service.receive("SENDEN_ECP", staticReply));
+        assertEquals("SUBMITTED", service.submit(change).status());
+        verify(transport, times(3)).sendEnergySharing(any());
     }
 
     @Test
@@ -230,13 +386,14 @@ class EdaEnergySharingServiceTest {
         var first = request("factor-first", "CHANGE_PARTICIPATION_FACTOR", parameters);
         assertEquals("SUBMITTED", service.submit(first).status());
         assertEquals("SUBMITTED", service.submit(first).status());
+        var second = request("factor-second", "CHANGE_PARTICIPATION_FACTOR", parameters);
         assertEquals(EnergySharingException.Code.CONFLICT, assertThrows(EnergySharingException.class,
-                () -> service.submit(request("factor-second", "CHANGE_PARTICIPATION_FACTOR", parameters))).code());
+                () -> service.submit(second)).code());
 
         var secondConnection = "application-two";
         var otherService = new EdaEnergySharingService(new EdaEnergySharingConfiguration(List.of(
                 new EdaEnergySharingConfiguration.Binding(secondConnection, OPERATOR, Map.of(EC, DSO), true))),
-                store, transport, mapper, clock);
+                store, transport, mapper, groupingIds, clock);
         var crossConnection = new EnergySharingRequest("factor-third", secondConnection, OPERATOR, EC,
                 "CHANGE_PARTICIPATION_FACTOR", EdaEnergySharingXml.VERSION, parameters);
         assertEquals(EnergySharingException.Code.CONFLICT,
@@ -293,6 +450,14 @@ class EdaEnergySharingServiceTest {
     private EnergySharingRequest request(String id, String operation, JsonNode parameters) {
         return new EnergySharingRequest(id, CONNECTION, OPERATOR, EC, operation, EdaEnergySharingXml.VERSION, parameters);
     }
+    private EdaEnergySharingService configuredService(Map<String, String> communities, boolean partnerConfigured) {
+        var binding = new EdaEnergySharingConfiguration.Binding(CONNECTION, OPERATOR, communities, partnerConfigured);
+        return new EdaEnergySharingService(new EdaEnergySharingConfiguration(List.of(binding)), store, transport, mapper, groupingIds, clock);
+    }
+    private EnergySharingRequest groupRequest(String id) {
+        return new EnergySharingRequest(id, CONNECTION, OPERATOR, "", "SYNC_MASTER_DATA", EdaEnergySharingXml.VERSION,
+                mapper.createObjectNode().put("start", "2026-01-01").put("end", "2026-12-31"));
+    }
     private EnergySharingOperation query(String id, String start, String end) {
         return service.submit(request(id, "SYNC_MASTER_DATA", mapper.createObjectNode().put("start", start).put("end", end)));
     }
@@ -338,6 +503,15 @@ class EdaEnergySharingServiceTest {
                   <cp:ConsentId>CONSENT1</cp:ConsentId><cp:MeteringPoint>%s</cp:MeteringPoint><cp:ConsentEnd>%s</cp:ConsentEnd>
                 </cp:ProcessDirectory></cp:CMRevoke>
                 """.formatted(COMMON, header, message, METER, end).getBytes(StandardCharsets.UTF_8);
+    }
+    private static byte[] processNotification(String conversation, String message, String code, int response) {
+        var header = header(code, DSO).replace("SchemaVersion=\"01.20\"", "SchemaVersion=\"01.13\"");
+        return """
+                <cp:CPNotification xmlns:cp="http://www.ebutilities.at/schemata/customerprocesses/cpnotification/01p13" xmlns:ct="%s">
+                %s<cp:ProcessDirectory><ct:MessageId>%s</ct:MessageId><ct:ConversationId>%s</ct:ConversationId>
+                  <cp:ResponseData><cp:OriginalMessageID>%s</cp:OriginalMessageID><cp:ResponseCode>%d</cp:ResponseCode></cp:ResponseData>
+                </cp:ProcessDirectory></cp:CPNotification>
+                """.formatted(COMMON, header, message, conversation, conversation, response).getBytes(StandardCharsets.UTF_8);
     }
     private static String member(String meter, String periods) {
         return "<cp:MPListData><cp:MeteringPoint>" + meter + "</cp:MeteringPoint><cp:ConsentId>CONSENT1</cp:ConsentId>" + periods + "</cp:MPListData>";

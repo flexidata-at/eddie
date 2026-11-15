@@ -7,6 +7,7 @@ import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
 import org.springframework.stereotype.Component;
 
 import java.time.ZonedDateTime;
+import java.util.UUID;
 
 import static energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata.AT_ZONE_ID;
 import static java.util.Objects.requireNonNull;
@@ -36,6 +37,14 @@ public final class EdaGroupingIdFactory {
         var partyId = configuration.eligiblePartyId();
         var address = configuration.conversationIdPrefix() + partyId;
         return new MessageId(address, dateTime).toString();
+    }
+
+    /** Creates a unique management conversation while preserving the configured adapter routing prefix. */
+    public String createRandomId() {
+        var prefix = configuration.conversationIdPrefix();
+        var random = UUID.randomUUID().toString().replace("-", "");
+        var suffixLength = Math.min(random.length(), MessageId.MAX_LENGTH - prefix.length());
+        return prefix + random.substring(0, suffixLength);
     }
 
     private void validateConfiguredLength(AtConfiguration.PartyIdType type, ZonedDateTime validationTime) {

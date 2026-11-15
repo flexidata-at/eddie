@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import java.time.ZonedDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EdaGroupingIdFactoryTest {
     private static final ZonedDateTime DATE_TIME = ZonedDateTime.parse("2026-09-01T12:00:00Z");
@@ -29,5 +31,19 @@ class EdaGroupingIdFactoryTest {
         var result = factory.create(DATE_TIME);
 
         assertEquals("EP123456T1788264000000", result);
+    }
+
+    @Test
+    void randomIdsPreserveRoutingPrefixWithinOfficialGroupingIdConstraints() {
+        for (var prefix : new String[]{"", "DATADEV", "ABCDEFGHIJKLM"}) {
+            var factory = new EdaGroupingIdFactory(new AtConfiguration("EP123456", null, prefix));
+            var first = factory.createRandomId();
+            var second = factory.createRandomId();
+
+            assertTrue(first.startsWith(prefix));
+            assertTrue(first.matches("[0-9A-Za-z]{1,35}"));
+            assertTrue(second.matches("[0-9A-Za-z]{1,35}"));
+            assertNotEquals(first, second);
+        }
     }
 }

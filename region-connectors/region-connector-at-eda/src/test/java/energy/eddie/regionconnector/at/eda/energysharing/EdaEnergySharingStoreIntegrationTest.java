@@ -32,24 +32,25 @@ class EdaEnergySharingStoreIntegrationTest {
     @Autowired private JpaEnergySharingRepository repository;
 
     @BeforeEach void clean(){repository.deleteAll();}
-    private EnergySharingRecord record(String id){return new EnergySharingRecord(id,"scope","OPERATION","immutable-request","market"+id,"0");}
+    private EnergySharingRecord row(String id){return new EnergySharingRecord(id,"scope","OPERATION","immutable-request","market"+id,"0");}
 
     @Test void insertCommitsBeforeTransportAndDuplicateCannotOverwriteIdentity() {
-        store.insert(record("r1"));
+        store.insert(row("r1"));
         assertEquals("immutable-request",repository.findById("r1").orElseThrow().fingerprint());
-        assertThrows(RuntimeException.class,()->store.insert(new EnergySharingRecord("r1","other","OPERATION","different","othermarket","overwritten")));
+        var duplicate = new EnergySharingRecord("r1","other","OPERATION","different","othermarket","overwritten");
+        assertThrows(RuntimeException.class,()->store.insert(duplicate));
         assertEquals("0",store.find("r1").orElseThrow().payload());
         assertEquals("scope",store.find("r1").orElseThrow().scope());
     }
     @Test void failedUpdateRollsBackWithoutLosingLastConfirmedState() {
-        store.insert(record("r2"));
+        store.insert(row("r2"));
         assertThrows(IllegalStateException.class,()->store.update("r2",old->{throw new IllegalStateException("parser failed");}));
         assertEquals("0",store.find("r2").orElseThrow().payload());
         store.update("r2",old->"confirmed");
         assertEquals("confirmed",repository.findByMarketId("marketr2").orElseThrow().payload());
     }
     @Test void concurrentUpdatesSerializeAndDoNotLoseInboundEvents() throws Exception {
-        store.insert(record("r3"));
+        store.insert(row("r3"));
         try(var executor=Executors.newFixedThreadPool(2)){
             var gate=new CountDownLatch(1);
             Callable<Void> task=()->{gate.await();for(int i=0;i<15;i++)store.update("r3",old->Integer.toString(Integer.parseInt(old)+1));return null;};
@@ -62,10 +63,22 @@ class EdaEnergySharingStoreIntegrationTest {
     @Test void competingDailyReservationsHaveOnlyOneWinner() throws Exception {
         try(var executor=Executors.newFixedThreadPool(2)){
             var gate=new CountDownLatch(1);
-            Callable<Boolean> task=()->{gate.await();try{store.insert(record("daily"));return true;}catch(RuntimeException e){return false;}};
+            Callable<Boolean> task=()->{gate.await();try{store.insert(row("daily"));return true;}catch(RuntimeException e){return false;}};
             var first=executor.submit(task);var second=executor.submit(task);gate.countDown();
             assertNotEquals(first.get(30,TimeUnit.SECONDS),second.get(30,TimeUnit.SECONDS));
         }
         assertEquals(1,repository.count());
+    }
+
+    @Test void durableReadsKeepMarketCorrelationSeparateFromScopeAndRecordKind() {
+        store.insert(row("operation"));
+        store.insert(new EnergySharingRecord("foreign","another-scope","OPERATION","fingerprint","foreign-market","{}"));
+        store.insert(new EnergySharingRecord("snapshot","scope","SNAPSHOT","fingerprint","snapshot-market","{}"));
+        assertEquals("operation",store.byMarketId("marketoperation").orElseThrow().id());
+        assertTrue(store.byMarketId("missing").isEmpty());
+        assertEquals(java.util.List.of("operation"),store.records("scope","OPERATION").stream().map(EnergySharingRecord::id).toList());
+        assertTrue(store.records("missing","OPERATION").isEmpty());
+        assertThrows(java.util.NoSuchElementException.class,()->store.update("missing",old->"must not insert"));
+        assertEquals(3,repository.count());
     }
 }

@@ -348,82 +348,88 @@ public class PontonMessengerConnectionImpl implements AutoCloseable, PontonMesse
               .log("Received message type: '{}' (version '{}') with ConversationId: '{}'");
 
         try (InputStream incomingStream = inboundMessage.createInputStream()) {
-            InputStream inputStream=incomingStream;
-            if (energySharingHandler != null && energySharingHandler.accepts(messageType)) {
-                byte[] bytes=incomingStream.readAllBytes();
-                if (energySharingHandler.handle(messageType,bytes)) {
-                    return InboundMessageStatusUpdate.newBuilder().setInboundMessage(inboundMessage)
-                            .setStatus(InboundStatusEnum.SUCCESS).setStatusText("Energy sharing message durably processed").build();
-                }
-                inputStream=new java.io.ByteArrayInputStream(bytes);
-            }
-            var result = switch (messageType) {
-                case MessageCodes.Notification.ANSWER ->
-                        handleNotification(inputStream, NotificationMessageType.CCMO_ANSWER);
-                case MessageCodes.Notification.ACCEPT ->
-                        handleNotification(inputStream, NotificationMessageType.CCMO_ACCEPT);
-                case MessageCodes.Notification.REJECT ->
-                        handleNotification(inputStream, NotificationMessageType.CCMO_REJECT);
-                case MessageCodes.Revoke.EligibleParty.ANSWER ->
-                        handleNotification(inputStream, NotificationMessageType.CCMS_ANSWER);
-                case MessageCodes.Revoke.EligibleParty.DENIAL ->
-                        handleNotification(inputStream, NotificationMessageType.CCMS_REJECT);
-                case MessageCodes.MASTER_DATA -> handleMasterData(inputStream);
-                case MessageCodes.CONSUMPTION_RECORD -> handleConsumptionRecord(inputStream);
-                case MessageCodes.Revoke.CUSTOMER, MessageCodes.Revoke.IMPLICIT -> handleRevoke(inputStream);
-                case MessageCodes.CPNotification.ANSWER ->
-                        handleCPNotification(inputStream, CPNotificationMessageType.ANTWORT_PT);
-                case MessageCodes.CPNotification.REJECT ->
-                        handleCPNotification(inputStream, CPNotificationMessageType.ABLEHNUNG_PT);
-                case MessageCodes.Notification.REJECT_ECON ->
-                        handleNotification(inputStream, NotificationMessageType.ECON_REJECT);
-                case MessageCodes.Notification.ANSWER_ECON ->
-                        handleNotification(inputStream, NotificationMessageType.ECON_ANSWER);
-                case MessageCodes.Notification.ACCEPT_ECON ->
-                        handleNotification(inputStream, NotificationMessageType.ECON_ACCEPT);
-                case MessageCodes.Notification.CANCEL_ECON ->
-                        handleNotification(inputStream, NotificationMessageType.ECON_CANCEL);
-                case MessageCodes.ECMPList.CONCLUSION_ECON -> handleECMPList(inputStream);
-                default -> {
-                    LOGGER.warn("Received message type '{}' (version '{}') is not supported.",
-                                messageType,
-                                messageVersion);
-                    yield new InboundMessageResult(InboundStatusEnum.REJECTED,
-                                                   "message type " + messageType + " version " + messageVersion + " is not supported.");
-                }
-            };
-            return InboundMessageStatusUpdate.newBuilder()
-                                             .setInboundMessage(inboundMessage)
-                                             .setStatus(result.status())
-                                             .setStatusText(result.statusMessage())
-                                             .build();
-        } catch (XmlMappingException e) {
+            var result = processInboundMessage(incomingStream, messageType, messageVersion);
+            return inboundStatus(inboundMessage, result.status(), result.statusMessage());
+        } catch (XmlMappingException exception) {
             LOGGER.atError()
                   .addArgument(messageType)
                   .addArgument(messageVersion)
-                  .setCause(e)
+                  .setCause(exception)
                   .log("Error while trying to unmarshal contents of message type '{}' in schema-version '{}'");
-            return InboundMessageStatusUpdate.newBuilder()
-                                             .setInboundMessage(inboundMessage)
-                                             .setStatus(InboundStatusEnum.REJECTED)
-                                             .setStatusText(e.getMessage())
-                                             .build();
-        } catch (IOException e) {
-            LOGGER.error("Error while reading input stream of message", e);
-            return InboundMessageStatusUpdate.newBuilder()
-                                             .setInboundMessage(inboundMessage)
-                                             .setStatus(InboundStatusEnum.TEMPORARY_ERROR)
-                                             .setStatusText(e.getMessage())
-                                             .build();
-        } catch (energy.eddie.api.agnostic.energysharing.EnergySharingException e) {
+            return inboundStatus(inboundMessage, InboundStatusEnum.REJECTED, exception.getMessage());
+        } catch (IOException exception) {
+            LOGGER.error("Error while reading input stream of message", exception);
+            return inboundStatus(inboundMessage, InboundStatusEnum.TEMPORARY_ERROR, exception.getMessage());
+        } catch (energy.eddie.api.agnostic.energysharing.EnergySharingException exception) {
             LOGGER.warn("Rejected energy sharing reply that failed schema or authorized-scope validation");
-            return InboundMessageStatusUpdate.newBuilder().setInboundMessage(inboundMessage)
-                    .setStatus(InboundStatusEnum.REJECTED).setStatusText("Market message failed schema or authorized-scope validation").build();
-        } catch (RuntimeException e) {
-            LOGGER.error("Could not persist/process inbound market message",e);
-            return InboundMessageStatusUpdate.newBuilder().setInboundMessage(inboundMessage)
-                    .setStatus(InboundStatusEnum.TEMPORARY_ERROR).setStatusText("Energy sharing processing failed; retry required").build();
+            return inboundStatus(inboundMessage, InboundStatusEnum.REJECTED,
+                    "Market message failed schema or authorized-scope validation");
+        } catch (RuntimeException exception) {
+            LOGGER.error("Could not persist/process inbound market message", exception);
+            return inboundStatus(inboundMessage, InboundStatusEnum.TEMPORARY_ERROR,
+                    "Energy sharing processing failed; retry required");
         }
+    }
+
+    private static InboundMessageStatusUpdate inboundStatus(
+            InboundMessage message, InboundStatusEnum status, @Nullable String description
+    ) {
+        return InboundMessageStatusUpdate.newBuilder().setInboundMessage(message)
+                .setStatus(status).setStatusText(description).build();
+    }
+
+    private InboundMessageResult processInboundMessage(
+            InputStream incomingStream, String messageType, String messageVersion
+    ) throws IOException {
+        var sharingHandler = energySharingHandler;
+        if (sharingHandler == null || !sharingHandler.accepts(messageType)) {
+            return processLegacyMessage(incomingStream, messageType, messageVersion);
+        }
+        var bytes = incomingStream.readAllBytes();
+        if (sharingHandler.handle(messageType, bytes)) {
+            return new InboundMessageResult(InboundStatusEnum.SUCCESS, "Energy sharing message durably processed");
+        }
+        return processLegacyMessage(new java.io.ByteArrayInputStream(bytes), messageType, messageVersion);
+    }
+
+    private InboundMessageResult processLegacyMessage(
+            InputStream inputStream, String messageType, String messageVersion
+    ) {
+        return switch (messageType) {
+            case MessageCodes.Notification.ANSWER ->
+                    handleNotification(inputStream, NotificationMessageType.CCMO_ANSWER);
+            case MessageCodes.Notification.ACCEPT ->
+                    handleNotification(inputStream, NotificationMessageType.CCMO_ACCEPT);
+            case MessageCodes.Notification.REJECT ->
+                    handleNotification(inputStream, NotificationMessageType.CCMO_REJECT);
+            case MessageCodes.Revoke.EligibleParty.ANSWER ->
+                    handleNotification(inputStream, NotificationMessageType.CCMS_ANSWER);
+            case MessageCodes.Revoke.EligibleParty.DENIAL ->
+                    handleNotification(inputStream, NotificationMessageType.CCMS_REJECT);
+            case MessageCodes.MASTER_DATA -> handleMasterData(inputStream);
+            case MessageCodes.CONSUMPTION_RECORD -> handleConsumptionRecord(inputStream);
+            case MessageCodes.Revoke.CUSTOMER, MessageCodes.Revoke.IMPLICIT -> handleRevoke(inputStream);
+            case MessageCodes.CPNotification.ANSWER ->
+                    handleCPNotification(inputStream, CPNotificationMessageType.ANTWORT_PT);
+            case MessageCodes.CPNotification.REJECT ->
+                    handleCPNotification(inputStream, CPNotificationMessageType.ABLEHNUNG_PT);
+            case MessageCodes.Notification.REJECT_ECON ->
+                    handleNotification(inputStream, NotificationMessageType.ECON_REJECT);
+            case MessageCodes.Notification.ANSWER_ECON ->
+                    handleNotification(inputStream, NotificationMessageType.ECON_ANSWER);
+            case MessageCodes.Notification.ACCEPT_ECON ->
+                    handleNotification(inputStream, NotificationMessageType.ECON_ACCEPT);
+            case MessageCodes.Notification.CANCEL_ECON ->
+                    handleNotification(inputStream, NotificationMessageType.ECON_CANCEL);
+            case MessageCodes.ECMPList.CONCLUSION_ECON -> handleECMPList(inputStream);
+            default -> {
+                LOGGER.warn("Received message type '{}' (version '{}') is not supported.",
+                            messageType,
+                            messageVersion);
+                yield new InboundMessageResult(InboundStatusEnum.REJECTED,
+                                               "message type " + messageType + " version " + messageVersion + " is not supported.");
+            }
+        };
     }
 
     private InboundMessageResult handleECMPList(InputStream inputStream) {
