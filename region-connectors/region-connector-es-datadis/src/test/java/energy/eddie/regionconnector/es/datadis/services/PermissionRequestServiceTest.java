@@ -21,6 +21,7 @@ import energy.eddie.regionconnector.es.datadis.dtos.AccountingPointData;
 import energy.eddie.regionconnector.es.datadis.dtos.ContractDetails;
 import energy.eddie.regionconnector.es.datadis.dtos.PermissionRequestForCreation;
 import energy.eddie.regionconnector.es.datadis.dtos.Supply;
+import energy.eddie.regionconnector.es.datadis.dtos.exceptions.AuthorizationNotVisibleException;
 import energy.eddie.regionconnector.es.datadis.exceptions.EsValidationException;
 import energy.eddie.regionconnector.es.datadis.permission.events.EsCreatedEvent;
 import energy.eddie.regionconnector.es.datadis.permission.events.EsMalformedEvent;
@@ -41,14 +42,17 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
+import reactor.test.scheduler.VirtualTimeScheduler;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import static energy.eddie.api.agnostic.data.needs.MultipleDataNeedCalculationResult.CalculationResult;
@@ -136,6 +140,69 @@ class PermissionRequestServiceTest {
 
         // Then
         verify(permissionRequestConsumer).consumeError(any(), eq(permissionRequest));
+    }
+
+    @Test
+    void acceptPermission_whenAuthorizationBecomesVisible_retriesAndAcceptsOnce() {
+        var permissionId = "eventually-visible";
+        var permissionRequest = mock(DatadisPermissionRequest.class);
+        var accountingPointData = mock(AccountingPointData.class);
+        var attempts = new AtomicInteger();
+        when(permissionRequest.permissionId()).thenReturn(permissionId);
+        when(repository.findByPermissionId(permissionId)).thenReturn(Optional.of(permissionRequest));
+        when(accountingPointDataService.fetchAccountingPointDataForPermissionRequest(permissionRequest))
+                .thenReturn(Mono.defer(() -> attempts.incrementAndGet() < 3
+                        ? Mono.error(new AuthorizationNotVisibleException(permissionId))
+                        : Mono.just(accountingPointData)));
+        var scheduler = VirtualTimeScheduler.getOrSet();
+        try {
+            assertThat(service.acceptPermission(Set.of(permissionId))).containsExactly(permissionId);
+            assertThat(attempts.get()).isEqualTo(1);
+            verifyNoInteractions(permissionRequestConsumer);
+
+            scheduler.advanceTimeBy(Duration.ofSeconds(9));
+            assertThat(attempts.get()).isEqualTo(1);
+            scheduler.advanceTimeBy(Duration.ofSeconds(11));
+
+            assertThat(attempts.get()).isEqualTo(3);
+            verify(permissionRequestConsumer).acceptPermission(permissionRequest, accountingPointData);
+            verifyNoMoreInteractions(permissionRequestConsumer);
+            scheduler.advanceTimeBy(Duration.ofMinutes(5));
+            assertThat(attempts.get()).isEqualTo(3);
+        } finally {
+            VirtualTimeScheduler.reset();
+        }
+    }
+
+    @Test
+    void acceptPermission_whenAuthorizationStaysInvisible_stopsAfterBoundedRetries() {
+        var permissionId = "never-visible";
+        var permissionRequest = mock(DatadisPermissionRequest.class);
+        var attempts = new AtomicInteger();
+        when(permissionRequest.permissionId()).thenReturn(permissionId);
+        when(repository.findByPermissionId(permissionId)).thenReturn(Optional.of(permissionRequest));
+        when(accountingPointDataService.fetchAccountingPointDataForPermissionRequest(permissionRequest))
+                .thenReturn(Mono.defer(() -> {
+                    attempts.incrementAndGet();
+                    return Mono.error(new AuthorizationNotVisibleException(permissionId));
+                }));
+        var scheduler = VirtualTimeScheduler.getOrSet();
+        try {
+            service.acceptPermission(Set.of(permissionId));
+            scheduler.advanceTimeBy(Duration.ofSeconds(179));
+            assertThat(attempts.get()).isEqualTo(18);
+            verifyNoInteractions(permissionRequestConsumer);
+
+            scheduler.advanceTimeBy(Duration.ofSeconds(1));
+            assertThat(attempts.get()).isEqualTo(19);
+            verify(permissionRequestConsumer).consumeError(
+                    argThat(error -> error.getCause() instanceof AuthorizationNotVisibleException), eq(permissionRequest));
+            verifyNoMoreInteractions(permissionRequestConsumer);
+            scheduler.advanceTimeBy(Duration.ofMinutes(5));
+            assertThat(attempts.get()).isEqualTo(19);
+        } finally {
+            VirtualTimeScheduler.reset();
+        }
     }
 
     @Test

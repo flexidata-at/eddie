@@ -8,6 +8,7 @@ import energy.eddie.api.agnostic.data.needs.DataNeedCalculationService;
 import energy.eddie.api.agnostic.process.model.PermissionRequest;
 import energy.eddie.api.agnostic.process.model.events.PermissionEventRepository;
 import energy.eddie.api.cim.config.CommonInformationModelConfiguration;
+import energy.eddie.cim.agnostic.PermissionProcessStatus;
 import energy.eddie.dataneeds.rules.DataNeedRuleSet;
 import energy.eddie.dataneeds.services.DataNeedsService;
 import energy.eddie.regionconnector.at.api.AtPermissionRequest;
@@ -46,6 +47,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.util.EnumSet;
 import java.util.function.Supplier;
 
 import static energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata.AT_ZONE_ID;
@@ -131,7 +133,8 @@ public class AtEdaBeanConfig {
                 eventBus,
                 repository,
                 AtPermissionRequest::message,
-                pr -> objectMapper.createObjectNode().put("cmRequestId", pr.cmRequestId())
+                pr -> objectMapper.createObjectNode().put("cmRequestId", pr.cmRequestId()),
+                () -> repository.findByStatusIn(EnumSet.allOf(PermissionProcessStatus.class))
         );
     }
 
@@ -149,7 +152,10 @@ public class AtEdaBeanConfig {
                                                             atConfig.eligiblePartyId(),
                                                             cimConfig,
                                                             pr -> TRANSMISSION_CYCLE.name(),
-                                                            AT_ZONE_ID);
+                                                            AT_ZONE_ID,
+                                                            () -> repository.findByStatusIn(
+                                                                    EnumSet.allOf(PermissionProcessStatus.class)
+                                                            ));
     }
 
     @Bean

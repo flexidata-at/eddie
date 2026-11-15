@@ -49,7 +49,7 @@ class PollingServiceTest {
     private UpdateGranularityTask updateGranularityTask;
 
     @Test
-    void fetchHistoricalMeterReadingsThrowsForbidden_revokesPermissionRequest() {
+    void fetchHistoricalMeterReadingsThrowsForbidden_keepsPermissionForRetry() {
         // Given
         doReturn(Mono.error(WebClientResponseException.create(HttpStatus.FORBIDDEN.value(), "", null, null, null)))
                 .when(enedisApi).getConsumptionMeterReading(anyString(), any(), any(), any());
@@ -73,7 +73,7 @@ class PollingServiceTest {
         pollingService.pollTimeSeriesData(request);
 
         // Then
-        verify(outbox).commit(assertArg(event -> assertEquals(PermissionProcessStatus.REVOKED, event.status())));
+        verifyNoInteractions(outbox);
 
         // Clean-Up
         streams.close();
@@ -132,7 +132,13 @@ class PollingServiceTest {
                                             Optional.empty(),
                                             MeterReading.CalculationMode.MEASURED,
                                             Optional.empty(),
-                                            List.of(),
+                                            List.of(new MeterReading.Reading(
+                                                    MeterReading.Direction.CONSUMPTION, "PA", "W",
+                                                    List.of(new MeterReading.Point(10.0,
+                                                            java.time.ZonedDateTime.now(ZoneOffset.UTC),
+                                                            Optional.of(Duration.ofMinutes(30)),
+                                                            Optional.empty(), Optional.empty(), Optional.empty())),
+                                                    List.of())),
                                             List.of()
                                     )
                             )

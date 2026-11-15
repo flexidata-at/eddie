@@ -8,7 +8,8 @@
     "docs:framework:build": "pnpm -C ./docs run build",
     "docs:aiida:build": "pnpm -C ./aiida/docs run build",
     "admin:build": "pnpm -C ./admin-console/ui run build --base=./",
-    "aiida:build": "pnpm -C ./aiida/ui run build"
+    "aiida:build": "pnpm -C ./aiida/ui run build",
+    "test:components": "node --experimental-vm-modules --test core/src/test/web/eddie-button-csp.test.mjs region-connectors/region-connector-at-eda/src/test/web/permission-request-form.test.mjs && node downstream/permission-forms.test.mjs ."
   },
   "engines": {
     "node": ">=22.19.0",

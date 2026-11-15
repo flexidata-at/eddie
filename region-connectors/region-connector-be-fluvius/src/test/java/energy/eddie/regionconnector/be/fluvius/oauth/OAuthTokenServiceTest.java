@@ -7,6 +7,8 @@ import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.crypto.RSASSAVerifier;
 import com.nimbusds.jose.util.Base64URL;
 import com.nimbusds.jwt.SignedJWT;
+import com.nimbusds.oauth2.sdk.TokenResponse;
+import com.nimbusds.oauth2.sdk.http.HTTPRequest;
 import energy.eddie.regionconnector.be.fluvius.config.FluviusOAuthConfiguration;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -22,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 
 import static energy.eddie.regionconnector.be.fluvius.config.FluviusOAuthConfiguration.AuthenticationMethod.CERTIFICATE;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
 
 class OAuthTokenServiceTest {
     private final MockWebServer server = new MockWebServer();
@@ -31,7 +35,7 @@ class OAuthTokenServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         server.start();
-        config = new FluviusOAuthConfiguration(server.url("/token").toString(), "client-id", "client-secret", "tenant-id", "api://test/.default");
+        config = new FluviusOAuthConfiguration(tokenUrl(), "client-id", "client-secret", "tenant-id", "api://test/.default");
     }
 
     @AfterEach
@@ -42,7 +46,7 @@ class OAuthTokenServiceTest {
     @Test
     void clientSecretRequestUsesBasicAuthenticationAndCachesOpaqueToken() throws Exception {
         server.enqueue(tokenResponse("opaque-access-token", 3600));
-        var service = new OAuthTokenService(config, bundles);
+        var service = serviceForLocalServer();
 
         assertEquals("opaque-access-token", service.accessToken());
         assertEquals("opaque-access-token", service.accessToken());
@@ -60,7 +64,7 @@ class OAuthTokenServiceTest {
     void tokenExpiringWithinOneMinuteIsRenewed() throws Exception {
         server.enqueue(tokenResponse("old-token", 30));
         server.enqueue(tokenResponse("new-token", 3600));
-        var service = new OAuthTokenService(config, bundles);
+        var service = serviceForLocalServer();
 
         assertEquals("old-token", service.accessToken());
         assertEquals("new-token", service.accessToken());
@@ -72,7 +76,7 @@ class OAuthTokenServiceTest {
         server.enqueue(new MockResponse().setResponseCode(400).addHeader("Content-Type", "application/json")
                                        .setBody("{\"error\":\"invalid_client\"}"));
         server.enqueue(tokenResponse("recovered-token", 3600));
-        var service = new OAuthTokenService(config, bundles);
+        var service = serviceForLocalServer();
 
         assertThrows(OAuthException.class, service::accessToken);
         assertEquals("recovered-token", service.accessToken());
@@ -82,9 +86,9 @@ class OAuthTokenServiceTest {
     void certificateRequestContainsSignedAssertionAndNoSecret() throws Exception {
         var fixture = new CertificateTestFixture();
         bundles.registerBundle("fluvius", fixture.bundle());
-        config = new FluviusOAuthConfiguration(server.url("/token").toString(), "live-client", null,
+        config = new FluviusOAuthConfiguration(tokenUrl(), "live-client", null,
                                                "tenant-id", "api://test/.default", CERTIFICATE, "fluvius");
-        var service = new OAuthTokenService(config, bundles);
+        var service = serviceForLocalServer();
         server.enqueue(tokenResponse("live-token", 3600));
 
         assertEquals("live-token", service.accessToken());
@@ -114,11 +118,11 @@ class OAuthTokenServiceTest {
     @Test
     void certificateRenewalCreatesFreshAssertion() throws Exception {
         bundles.registerBundle("fluvius", new CertificateTestFixture().bundle());
-        config = new FluviusOAuthConfiguration(server.url("/token").toString(), "live-client", null,
+        config = new FluviusOAuthConfiguration(tokenUrl(), "live-client", null,
                                                "tenant-id", "scope", CERTIFICATE, "fluvius");
         server.enqueue(tokenResponse("first", 0));
         server.enqueue(tokenResponse("second", 3600));
-        var service = new OAuthTokenService(config, bundles);
+        var service = serviceForLocalServer();
 
         service.accessToken();
         service.accessToken();
@@ -135,6 +139,81 @@ class OAuthTokenServiceTest {
                                                               "tenant", "scope", CERTIFICATE, "missing");
         assertThrows(org.springframework.boot.ssl.NoSuchSslBundleException.class,
                      () -> new OAuthTokenService(certificateConfig, bundles));
+    }
+
+    @Test
+    void certificateSupportsExistingRs256Registration() throws Exception {
+        var fixture = new CertificateTestFixture();
+        bundles.registerBundle("fluvius", fixture.bundle());
+        config = new FluviusOAuthConfiguration(tokenUrl(), "live-client", null, "tenant-id", "scope",
+                CERTIFICATE, "fluvius", FluviusOAuthConfiguration.AssertionAlgorithm.RS256);
+        var request = new OAuthTokenService(config, bundles).buildRequest();
+        var parameters = com.nimbusds.oauth2.sdk.util.URLUtils.parseParameters(request.getBody());
+        var assertion = SignedJWT.parse(parameters.get("client_assertion").getFirst());
+        assertTrue(assertion.verify(new RSASSAVerifier((RSAPublicKey) fixture.certificate().getPublicKey())));
+        assertEquals(JWSAlgorithm.RS256, assertion.getHeader().getAlgorithm());
+        assertEquals(Base64URL.encode(MessageDigest.getInstance("SHA-1").digest(fixture.certificate().getEncoded())),
+                assertion.getHeader().getX509CertThumbprint());
+        assertNull(assertion.getHeader().getX509CertSHA256Thumbprint());
+    }
+
+    @Test
+    void requestUsesBoundedTimeoutsAndNeverFollowsRedirects() throws Exception {
+        var request = new OAuthTokenService(config, bundles).buildRequest();
+        assertEquals(10_000, request.getConnectTimeout());
+        assertEquals(20_000, request.getReadTimeout());
+        assertFalse(request.getFollowRedirects());
+    }
+
+    @Test
+    void tokenEndpointRejectsHttpUserInfoAndFragments() {
+        for (var endpoint : java.util.List.of("http://localhost/token", "https://user@example.com/token", "https://example.com/token#fragment")) {
+            var unsafe = new FluviusOAuthConfiguration(endpoint, "client", "secret", "tenant", "scope");
+            var service = new OAuthTokenService(unsafe, bundles);
+            assertThrows(OAuthException.class, service::buildRequest);
+        }
+    }
+
+    @Test
+    void remoteErrorCannotExposeCredentials() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(400).addHeader("Content-Type", "application/json")
+                .setBody("{\"error\":\"invalid_client\",\"error_description\":\"sensitive-provider-response\"}"));
+        var service = serviceForLocalServer();
+        var error = assertThrows(OAuthException.class, service::accessToken);
+        assertEquals("Fluvius OAuth token request rejected", error.getMessage());
+        assertFalse(error.toString().contains("sensitive-provider-response"));
+    }
+
+    @Test
+    void certificateRefreshResolvesCurrentManagedBundle() throws Exception {
+        var fixture = new CertificateTestFixture();
+        var managedBundles = mock(org.springframework.boot.ssl.SslBundles.class);
+        when(managedBundles.getBundle("fluvius")).thenReturn(fixture.bundle());
+        var certificateConfig = new FluviusOAuthConfiguration(tokenUrl(), "client", null, "tenant", "scope", CERTIFICATE, "fluvius");
+        var service = new OAuthTokenService(certificateConfig, managedBundles);
+        service.buildRequest();
+        service.buildRequest();
+        verify(managedBundles, times(3)).getBundle("fluvius");
+    }
+
+    private String tokenUrl() {
+        return server.url("/token").toString().replace("http:", "https:");
+    }
+
+    private OAuthTokenService serviceForLocalServer() throws Exception {
+        var service = spy(new OAuthTokenService(config, bundles));
+        // Keep production HTTPS validation while exercising the HTTP mock server as a test transport.
+        doAnswer(invocation -> {
+            HTTPRequest original = invocation.getArgument(0);
+            var local = new HTTPRequest(original.getMethod(), server.url("/token").url());
+            original.getHeaderMap().forEach((name, values) -> local.setHeader(name, values.toArray(String[]::new)));
+            local.setBody(original.getBody());
+            local.setConnectTimeout(original.getConnectTimeout());
+            local.setReadTimeout(original.getReadTimeout());
+            local.setFollowRedirects(original.getFollowRedirects());
+            return TokenResponse.parse(local.send());
+        }).when(service).requestToken(any(HTTPRequest.class));
+        return service;
     }
 
     private static MockResponse tokenResponse(String token, int expiresIn) {

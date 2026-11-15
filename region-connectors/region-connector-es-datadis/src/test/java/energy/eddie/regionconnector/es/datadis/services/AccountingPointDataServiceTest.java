@@ -12,6 +12,7 @@ import energy.eddie.regionconnector.es.datadis.api.AuthorizationApi;
 import energy.eddie.regionconnector.es.datadis.api.MeasurementType;
 import energy.eddie.regionconnector.es.datadis.dtos.ContractDetails;
 import energy.eddie.regionconnector.es.datadis.dtos.Supply;
+import energy.eddie.regionconnector.es.datadis.dtos.exceptions.AuthorizationNotVisibleException;
 import energy.eddie.regionconnector.es.datadis.dtos.exceptions.InvalidPointAndMeasurementTypeCombinationException;
 import energy.eddie.regionconnector.es.datadis.dtos.exceptions.NoContractsException;
 import energy.eddie.regionconnector.es.datadis.dtos.exceptions.NoSuppliesException;
@@ -134,7 +135,7 @@ class AccountingPointDataServiceTest {
 
 
     @Test
-    void fetchAccountingPointDataForPermissionRequest_withoutAuthorizationForNif_returnsNothing() throws IOException {
+    void fetchAccountingPointDataForPermissionRequest_withoutAuthorizationForNif_returnsRetryableError() throws IOException {
         // Given
         var permissionRequest = (EsPermissionRequest) new DatadisPermissionRequestBuilder()
                 .setNif("G11111111")
@@ -163,11 +164,12 @@ class AccountingPointDataServiceTest {
 
         // Then
         StepVerifier.create(accountingPointDataMono)
-                    .verifyComplete();
+                    .expectError(AuthorizationNotVisibleException.class)
+                    .verify();
     }
 
     @Test
-    void fetchAccountingPointDataForPermissionRequest_withoutAuthorizationForCUPS_returnsNothing() throws IOException {
+    void fetchAccountingPointDataForPermissionRequest_withoutAuthorizationForCUPS_returnsRetryableError() throws IOException {
         // Given
         var permissionRequest = (EsPermissionRequest) new DatadisPermissionRequestBuilder()
                 .setNif("G00000000")
@@ -196,7 +198,8 @@ class AccountingPointDataServiceTest {
 
         // Then
         StepVerifier.create(accountingPointDataMono)
-                    .verifyComplete();
+                    .expectError(AuthorizationNotVisibleException.class)
+                    .verify();
     }
 
     private static EsPermissionRequest acceptedPermissionRequest() {

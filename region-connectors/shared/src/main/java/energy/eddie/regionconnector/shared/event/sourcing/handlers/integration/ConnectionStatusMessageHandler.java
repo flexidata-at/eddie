@@ -9,6 +9,7 @@ import energy.eddie.api.agnostic.process.model.events.InternalPermissionEvent;
 import energy.eddie.api.agnostic.process.model.events.PermissionEvent;
 import energy.eddie.api.agnostic.process.model.persistence.PermissionRequestRepository;
 import energy.eddie.cim.agnostic.ConnectionStatusMessage;
+import energy.eddie.cim.agnostic.PermissionProcessStatus;
 import energy.eddie.regionconnector.shared.event.sourcing.EventBus;
 import energy.eddie.regionconnector.shared.event.sourcing.handlers.EventHandler;
 import org.slf4j.Logger;
@@ -17,7 +18,9 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 import tools.jackson.databind.JsonNode;
 
+import java.util.List;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Subscribes to all events of an {@code EventBus} and creates connection status messages based on an event.
@@ -28,13 +31,14 @@ public class ConnectionStatusMessageHandler<T extends PermissionRequest> impleme
     private final PermissionRequestRepository<T> repository;
     private final Function<T, String> messageFunc;
     private final Function<T, JsonNode> additionalDataFunc;
+    private final Supplier<? extends Iterable<T>> initialRequests;
 
     public ConnectionStatusMessageHandler(
             EventBus eventBus,
             PermissionRequestRepository<T> repository,
             Function<T, String> messageFunc
     ) {
-        this(eventBus, repository, messageFunc, permissionRequest -> null);
+        this(eventBus, repository, messageFunc, permissionRequest -> null, List::of);
     }
 
     public ConnectionStatusMessageHandler(
@@ -43,9 +47,20 @@ public class ConnectionStatusMessageHandler<T extends PermissionRequest> impleme
             Function<T, String> messageFunc,
             Function<T, JsonNode> additionalDataFunc
     ) {
+        this(eventBus, repository, messageFunc, additionalDataFunc, List::of);
+    }
+
+    public ConnectionStatusMessageHandler(
+            EventBus eventBus,
+            PermissionRequestRepository<T> repository,
+            Function<T, String> messageFunc,
+            Function<T, JsonNode> additionalDataFunc,
+            Supplier<? extends Iterable<T>> initialRequests
+    ) {
         this.repository = repository;
         this.messageFunc = messageFunc;
         this.additionalDataFunc = additionalDataFunc;
+        this.initialRequests = initialRequests;
         eventBus.filteredFlux(PermissionEvent.class)
                 .subscribe(this::accept);
     }
@@ -67,22 +82,30 @@ public class ConnectionStatusMessageHandler<T extends PermissionRequest> impleme
         }
         LOGGER.trace("Publishing connection status message for permission id {} with status {}", permissionId, status);
         var permissionRequest = optionalRequest.get();
-        messages.tryEmitNext(
-                new ConnectionStatusMessage(
-                        permissionRequest.connectionId(),
-                        permissionId,
-                        permissionRequest.dataNeedId(),
-                        permissionRequest.dataSourceInformation(),
-                        status,
-                        messageFunc.apply(permissionRequest),
-                        additionalDataFunc.apply(permissionRequest)
-                )
-        );
+        emit(toConnectionStatusMessage(permissionRequest, status));
     }
 
     @MessageStream(ConnectionStatusMessage.class)
     public Flux<ConnectionStatusMessage> getConnectionStatusMessageStream() {
-        return messages.asFlux();
+        return Flux.defer(() -> Flux.fromIterable(initialRequests.get())
+                                   .map(request -> toConnectionStatusMessage(request, request.status())))
+                   .concatWith(messages.asFlux());
+    }
+
+    private ConnectionStatusMessage toConnectionStatusMessage(T request, PermissionProcessStatus status) {
+        return new ConnectionStatusMessage(
+                request.connectionId(),
+                request.permissionId(),
+                request.dataNeedId(),
+                request.dataSourceInformation(),
+                status,
+                messageFunc.apply(request),
+                additionalDataFunc.apply(request)
+        );
+    }
+
+    private synchronized void emit(ConnectionStatusMessage message) {
+        messages.tryEmitNext(message);
     }
 
     @Override

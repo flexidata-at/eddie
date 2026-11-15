@@ -6,11 +6,9 @@ package energy.eddie.regionconnector.fr.enedis.tasks;
 import energy.eddie.api.agnostic.Granularity;
 import energy.eddie.api.agnostic.data.needs.DataNeedCalculationService;
 import energy.eddie.api.agnostic.data.needs.ValidatedHistoricalDataDataNeedResult;
-import energy.eddie.cim.agnostic.PermissionProcessStatus;
 import energy.eddie.regionconnector.fr.enedis.api.FrEnedisPermissionRequest;
 import energy.eddie.regionconnector.fr.enedis.dto.EnedisApiError;
 import energy.eddie.regionconnector.fr.enedis.permission.events.FrGranularityUpdateEvent;
-import energy.eddie.regionconnector.fr.enedis.permission.events.FrSimpleEvent;
 import energy.eddie.regionconnector.shared.event.sourcing.Outbox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,20 +39,23 @@ public class UpdateGranularityTask {
             outbox.commit(new FrGranularityUpdateEvent(permissionId, Granularity.P1D));
             return;
         }
-        LOGGER.info(
-                "Could not update permission request {} to use higher granularity, since it already uses highest possible granularity {}",
-                permissionId,
-                Granularity.P1D
-        );
-        outbox.commit(new FrSimpleEvent(permissionId, PermissionProcessStatus.UNFULFILLABLE));
+        LOGGER.info("ENEDIS has no data yet for permission request {} at {}; retaining accepted permission for retry",
+                    permissionId, permissionRequest.granularity());
     }
 
     private static boolean isDataNotFoundError(Throwable throwable) {
         if (!(throwable instanceof WebClientResponseException webclientException)) {
             return false;
         }
-        var error = webclientException.getResponseBodyAs(EnedisApiError.class);
-        return error != null && "no_data_found".equals(error.error());
+        try {
+            var error = webclientException.getResponseBodyAs(EnedisApiError.class);
+            return error != null && "no_data_found".equals(error.error());
+        } catch (RuntimeException exception) {
+            // A proxy/technical error may return HTML or malformed JSON. It is not a no-data decision.
+            LOGGER.warn("Could not decode ENEDIS error response with HTTP status {}; retaining the permission for retry",
+                        webclientException.getStatusCode());
+            return false;
+        }
     }
 
     private boolean containsHigherGranularity(FrEnedisPermissionRequest permissionRequest) {

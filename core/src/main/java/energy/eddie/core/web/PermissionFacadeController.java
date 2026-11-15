@@ -15,10 +15,13 @@ import energy.eddie.dataneeds.rules.DataNeedRuleSet;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static energy.eddie.api.agnostic.GlobalConfig.ERRORS_PROPERTY_NAME;
 
@@ -72,7 +75,8 @@ public class PermissionFacadeController {
             @PathVariable("region-connector") String regionConnector,
             @RequestParam("data-need-id") Set<String> dataNeedId
     ) throws UnknownRegionConnectorException {
-        return switch (dataNeedCalculationRouter.calculateFor(regionConnector, dataNeedId)) {
+        var normalisedDataNeedIds = normaliseDataNeedIds(dataNeedId);
+        return switch (dataNeedCalculationRouter.calculateFor(regionConnector, normalisedDataNeedIds)) {
             case MultipleDataNeeds(Map<String, DataNeedCalculation> result) -> ResponseEntity.ok(result);
             case MultipleDataNeedsError multipleDataNeedsError -> {
                 var errorMap = Map.of(ERRORS_PROPERTY_NAME, List.of(multipleDataNeedsError));
@@ -84,7 +88,15 @@ public class PermissionFacadeController {
 
     @GetMapping("/region-connectors/data-needs")
     public Set<String> supportedDataNeeds(@RequestParam("data-need-id") Set<String> dataNeedIds) {
-        return dataNeedCalculationRouter.findRegionConnectorsSupportingDataNeeds(dataNeedIds);
+        return dataNeedCalculationRouter.findRegionConnectorsSupportingDataNeeds(normaliseDataNeedIds(dataNeedIds));
+    }
+
+    private Set<String> normaliseDataNeedIds(Set<String> values) {
+        return values.stream()
+                     .flatMap(value -> Arrays.stream(value.split(",")))
+                     .map(String::trim)
+                     .filter(value -> !value.isBlank())
+                     .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     @GetMapping("/region-connectors/data-need-rule-sets")

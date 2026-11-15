@@ -126,6 +126,21 @@ class PermissionFacadeControllerTest {
     }
 
     @Test
+    void dataNeedCalculationsWithCommaSeparatedDataNeeds_returnsDataNeedCalculation() throws Exception {
+        var result = new HashMap<String, DataNeedCalculation>();
+        result.put("dnid1", new DataNeedCalculation(false, ""));
+        result.put("dnid2", new DataNeedCalculation(true, null, null, null));
+        when(router.calculateFor("at-eda", Set.of("dnid1", "dnid2")))
+                .thenReturn(new MultipleDataNeeds(result));
+
+        mockMvc.perform(get("/api/region-connectors/at-eda/data-needs")
+                                .queryParam("data-need-id", "dnid1,dnid2"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.dnid1.supportsDataNeed").value(false))
+               .andExpect(jsonPath("$.dnid2.supportsDataNeed").value(true));
+    }
+
+    @Test
     void dataNeedCalculationsWithInvalidCombination_returnsError() throws Exception {
         // Given
         when(router.calculateFor("at-eda", Set.of("dnid1", "dnid2", "dnid3")))
@@ -167,6 +182,42 @@ class PermissionFacadeControllerTest {
 
         mockMvc.perform(get("/api/region-connectors/data-needs")
                                 .queryParam("data-need-id", "dnid1", "dnid2"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$").value(hasSize(2)));
+    }
+
+    @Test
+    void regionConnectorsSupportCommaSeparatedDataNeeds_returnsAllSupportedRegionConnectors() throws Exception {
+        when(router.findRegionConnectorsSupportingDataNeeds(Set.of("dnid1", "dnid2")))
+                .thenReturn(Set.of("at-eda", "be-fluvius"));
+
+        mockMvc.perform(get("/api/region-connectors/data-needs")
+                                .queryParam("data-need-id", "dnid1,dnid2"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$").value(hasSize(2)));
+    }
+
+    @Test
+    void dataNeedCalculationsWithMixedRepeatedCsvParameters_normalizesWhitespaceDuplicatesAndEmptyIds() throws Exception {
+        when(router.calculateFor("at-eda", Set.of("dnid1", "dnid2")))
+                .thenReturn(new MultipleDataNeeds(Map.of(
+                        "dnid1", new DataNeedCalculation(true, null, null, null),
+                        "dnid2", new DataNeedCalculation(true, null, null, null))));
+
+        mockMvc.perform(get("/api/region-connectors/at-eda/data-needs")
+                                .queryParam("data-need-id", " dnid1, dnid2 ", "dnid2, ,dnid1"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.dnid1.supportsDataNeed").value(true))
+               .andExpect(jsonPath("$.dnid2.supportsDataNeed").value(true));
+    }
+
+    @Test
+    void regionConnectorsWithMixedRepeatedCsvParameters_normalizesWhitespaceDuplicatesAndEmptyIds() throws Exception {
+        when(router.findRegionConnectorsSupportingDataNeeds(Set.of("dnid1", "dnid2")))
+                .thenReturn(Set.of("at-eda", "be-fluvius"));
+
+        mockMvc.perform(get("/api/region-connectors/data-needs")
+                                .queryParam("data-need-id", " dnid1, dnid2 ", "dnid2, ,dnid1"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$").value(hasSize(2)));
     }

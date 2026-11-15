@@ -3,10 +3,14 @@
 
 package energy.eddie.core.services;
 
+import energy.eddie.cim.agnostic.ConnectionStatusMessage;
+import energy.eddie.cim.v0_82.pmd.PermissionEnvelope;
+import energy.eddie.cim.v1_12.rpmd.RequestPermissionEnvelope;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -22,6 +26,7 @@ import java.util.function.Supplier;
  */
 @Component
 public class MessageStreamHub implements AutoCloseable {
+    private static final Duration LIFECYCLE_REPLAY_WINDOW = Duration.ofMinutes(5);
     private final Map<Class<?>, Sinks.Many<Object>> sinksByType = new HashMap<>();
     private final Map<Class<?>, List<Consumer<Flux<?>>>> receiversByType = new HashMap<>();
 
@@ -30,7 +35,7 @@ public class MessageStreamHub implements AutoCloseable {
         var isPresent = sinksByType.containsKey(messageType);
         var sink = (Sinks.Many<T>) sinksByType.computeIfAbsent(
                 messageType,
-                key -> Sinks.many().multicast().onBackpressureBuffer()
+                MessageStreamHub::createSink
         );
 
         provider.get().subscribe(sink::tryEmitNext);
@@ -58,5 +63,14 @@ public class MessageStreamHub implements AutoCloseable {
         for (var sink : sinksByType.values()) {
             sink.tryEmitComplete();
         }
+    }
+
+    private static Sinks.Many<Object> createSink(Class<?> messageType) {
+        if (messageType.equals(ConnectionStatusMessage.class)
+                || messageType.equals(PermissionEnvelope.class)
+                || messageType.equals(RequestPermissionEnvelope.class)) {
+            return Sinks.many().replay().limit(LIFECYCLE_REPLAY_WINDOW);
+        }
+        return Sinks.many().multicast().onBackpressureBuffer();
     }
 }

@@ -33,7 +33,7 @@ class PermissionRequestForm extends PermissionRequestFormBase {
 
     const jsonData = {};
     jsonData.refreshToken = formData.get("refreshToken");
-    jsonData.meteringPoint = formData.get("meteringPoint");
+    jsonData.meteringPoint = this.accountingPointId?.trim() || formData.get("meteringPoint");
     jsonData.connectionId = this.connectionId;
     jsonData.dataNeedId = this.dataNeedId;
 

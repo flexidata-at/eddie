@@ -13,6 +13,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
 import java.util.Optional;
+import java.util.Map;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,6 +41,18 @@ class AtConfigurationTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBean(AtConfiguration.class).conversationIdPrefix()).isEqualTo("DEV1");
                 });
+    }
+
+    @Test
+    void deployedConversationPrefixEnvironmentVariable_isBound() {
+        contextRunner.withInitializer(context -> context.getEnvironment().getPropertySources().addFirst(
+                new SystemEnvironmentPropertySource("deployment", Map.of(
+                        "REGION_CONNECTOR_AT_EDA_CONVERSATION_ID_PREFIX", "DATADEV"
+                ))
+        )).run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(AtConfiguration.class).conversationIdPrefix()).isEqualTo("DATADEV");
+        });
     }
 
     @ParameterizedTest

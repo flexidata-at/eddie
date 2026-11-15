@@ -24,6 +24,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 import java.time.ZoneId;
+import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * This class converts a {@link PermissionEvent} to a CIM compliant document and provides them via a {@link Flux}.
@@ -36,6 +38,7 @@ public class PermissionMarketDocumentMessageHandler<T extends PermissionRequest>
     private final Sinks.Many<PermissionEnvelope> pmdSink = Sinks.many().multicast().onBackpressureBuffer();
     private final Sinks.Many<Object> genericPmdSink = Sinks.many().multicast().onBackpressureBuffer();
     private final IntermediatePermissionMarketDocumentFactory<T> permissionMarketDocumentFactory;
+    private final Supplier<? extends Iterable<T>> initialRequests;
 
     public PermissionMarketDocumentMessageHandler(
             EventBus eventBus,
@@ -46,8 +49,23 @@ public class PermissionMarketDocumentMessageHandler<T extends PermissionRequest>
             TransmissionScheduleProvider<T> transmissionScheduleProvider,
             ZoneId zoneId
     ) {
+        this(eventBus, repository, dataNeedsService, eligiblePartyId, cimConfig,
+                transmissionScheduleProvider, zoneId, List::of);
+    }
+
+    public PermissionMarketDocumentMessageHandler(
+            EventBus eventBus,
+            PermissionRequestRepository<T> repository,
+            DataNeedsService dataNeedsService,
+            String eligiblePartyId,
+            CommonInformationModelConfiguration cimConfig,
+            TransmissionScheduleProvider<T> transmissionScheduleProvider,
+            ZoneId zoneId,
+            Supplier<? extends Iterable<T>> initialRequests
+    ) {
         this.repository = repository;
         this.dataNeedsService = dataNeedsService;
+        this.initialRequests = initialRequests;
         this.permissionMarketDocumentFactory = new IntermediatePermissionMarketDocumentFactory<>(
                 eligiblePartyId,
                 transmissionScheduleProvider,
@@ -75,18 +93,18 @@ public class PermissionMarketDocumentMessageHandler<T extends PermissionRequest>
         permissionMarketDocumentFactory.each(permissionRequest, permissionEvent.status(), dataNeed)
                                        .map(IntermediatePermissionMarketDocument::toPermissionMarketDocument)
                                        .onErrorContinue(PermissionMarketDocumentMessageHandler::onError)
-                                       .subscribe(genericPmdSink::tryEmitNext);
+                                       .subscribe(this::emit);
     }
 
     @MessageStream(PermissionEnvelope.class)
     public Flux<PermissionEnvelope> getPermissionMarketDocumentStream() {
-        return genericPmdSink.asFlux()
+        return Flux.merge(initialDocuments(), genericPmdSink.asFlux())
                              .ofType(PermissionEnvelope.class);
     }
 
     @MessageStream(RequestPermissionEnvelope.class)
     public Flux<RequestPermissionEnvelope> getRequestPermissionDocumentStream() {
-        return genericPmdSink.asFlux()
+        return Flux.merge(initialDocuments(), genericPmdSink.asFlux())
                              .ofType(RequestPermissionEnvelope.class);
     }
 
@@ -98,5 +116,20 @@ public class PermissionMarketDocumentMessageHandler<T extends PermissionRequest>
 
     private static void onError(Throwable throwable, Object obj) {
         LOGGER.warn("Error while trying to convert PermissionMarketDocument {}.", obj, throwable);
+    }
+
+    private Flux<Object> initialDocuments() {
+        return Flux.defer(() -> Flux.fromIterable(initialRequests.get()))
+                .flatMap(request -> permissionMarketDocumentFactory.each(request, request.status(),
+                                dataNeedsService.getById(request.dataNeedId()))
+                        .map(IntermediatePermissionMarketDocument::toPermissionMarketDocument))
+                .onErrorContinue(PermissionMarketDocumentMessageHandler::onError);
+    }
+
+    private synchronized void emit(Object document) {
+        var result = genericPmdSink.tryEmitNext(document);
+        if (result.isFailure()) {
+            LOGGER.warn("Could not emit PermissionMarketDocument {}: {}", document, result);
+        }
     }
 }

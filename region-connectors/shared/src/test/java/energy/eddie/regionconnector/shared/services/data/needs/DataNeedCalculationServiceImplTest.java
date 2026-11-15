@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -423,14 +424,22 @@ class DataNeedCalculationServiceImplTest {
     @Test
     void givenMultipleValidatedHistoricalDataDataNeedsWithSameEnergyType_whenCalculateAll_thenReturnsRepeatedDataNeedResult() {
         // Given
-        var vhd = new ValidatedHistoricalDataDataNeed(
+        var vhd1 = new ValidatedHistoricalDataDataNeed(
                 new RelativeDuration(null, null, null),
                 EnergyType.ELECTRICITY,
                 Granularity.PT1H,
                 Granularity.P1D
         );
-        when(dataNeedsService.findById("vhd-dnid-1")).thenReturn(Optional.of(vhd));
-        when(dataNeedsService.findById("vhd-dnid-2")).thenReturn(Optional.of(vhd));
+        vhd1.setId("vhd-dnid-1");
+        var vhd2 = new ValidatedHistoricalDataDataNeed(
+                new RelativeDuration(null, null, null),
+                EnergyType.ELECTRICITY,
+                Granularity.PT1H,
+                Granularity.P1D
+        );
+        vhd2.setId("vhd-dnid-2");
+        when(dataNeedsService.findById("vhd-dnid-1")).thenReturn(Optional.of(vhd1));
+        when(dataNeedsService.findById("vhd-dnid-2")).thenReturn(Optional.of(vhd2));
         List<DataNeedRule> dataNeedRules = List.of(
                 new ValidatedHistoricalDataDataNeedRule(EnergyType.ELECTRICITY, List.of(Granularity.PT1H)),
                 new AccountingPointDataNeedRule(),
@@ -447,6 +456,73 @@ class DataNeedCalculationServiceImplTest {
         assertThat(res).isInstanceOf(InvalidDataNeedCombination.class);
     }
 
+    @Test
+    void givenNonOverlappingValidatedDataNeedsWithSameEnergyType_whenCalculateAll_thenReturnsCorrectResults() {
+        var history = new ValidatedHistoricalDataDataNeed(
+                new RelativeDuration(Period.ofDays(-10), Period.ofDays(-1), null),
+                EnergyType.ELECTRICITY,
+                Granularity.PT1H,
+                Granularity.P1D
+        );
+        var future = new ValidatedHistoricalDataDataNeed(
+                new RelativeDuration(Period.ZERO, Period.ofDays(10), null),
+                EnergyType.ELECTRICITY,
+                Granularity.PT1H,
+                Granularity.P1D
+        );
+        history.setId("history-dnid");
+        future.setId("future-dnid");
+        when(dataNeedsService.findById("history-dnid")).thenReturn(Optional.of(history));
+        when(dataNeedsService.findById("future-dnid")).thenReturn(Optional.of(future));
+        List<DataNeedRule> dataNeedRules = List.of(
+                new ValidatedHistoricalDataDataNeedRule(EnergyType.ELECTRICITY, List.of(Granularity.PT1H)),
+                new AllowMultipleDataNeedsRule()
+        );
+        var service = new DataNeedCalculationServiceImpl(dataNeedsService,
+                                                         metadata,
+                                                         new TestDataNeedRuleSet(dataNeedRules));
+
+        var res = service.calculateAll(Set.of("history-dnid", "future-dnid"));
+
+        assertThat(res)
+                .asInstanceOf(type(CalculationResult.class))
+                .extracting(CalculationResult::result)
+                .asInstanceOf(map(String.class, DataNeedCalculationResult.class))
+                .hasSize(2);
+    }
+
+
+    @ParameterizedTest
+    @CsvSource({"-5,true", "0,true", "1,false"})
+    void givenSameEnergyTypeTimeframes_whenCalculateAll_thenTreatEndDateAsInclusive(
+            int secondStartDay, boolean overlaps
+    ) {
+        var first = new ValidatedHistoricalDataDataNeed(
+                new RelativeDuration(Period.ofDays(-10), Period.ZERO, null),
+                EnergyType.ELECTRICITY, Granularity.PT1H, Granularity.P1D);
+        var second = new ValidatedHistoricalDataDataNeed(
+                new RelativeDuration(Period.ofDays(secondStartDay), Period.ofDays(10), null),
+                EnergyType.ELECTRICITY, Granularity.PT1H, Granularity.P1D);
+        first.setId("first");
+        second.setId("second");
+        when(dataNeedsService.findById("first")).thenReturn(Optional.of(first));
+        when(dataNeedsService.findById("second")).thenReturn(Optional.of(second));
+        List<DataNeedRule> rules = List.of(
+                new ValidatedHistoricalDataDataNeedRule(EnergyType.ELECTRICITY, List.of(Granularity.PT1H)),
+                new AllowMultipleDataNeedsRule());
+        var service = new DataNeedCalculationServiceImpl(dataNeedsService, metadata, new TestDataNeedRuleSet(rules));
+        var result = service.calculateAll(Set.of("second", "first"), ZonedDateTime.parse("2026-11-15T12:00:00Z"));
+
+        if (overlaps) {
+            assertThat(result).isInstanceOf(InvalidDataNeedCombination.class);
+        } else {
+            assertThat(result)
+                    .asInstanceOf(type(CalculationResult.class))
+                    .extracting(CalculationResult::result)
+                    .asInstanceOf(map(String.class, DataNeedCalculationResult.class))
+                    .hasSize(2);
+        }
+    }
 
     @Test
     void givenMixedDataDataNeeds_whenCalculateAll_thenReturnsInvalidMixedDataNeedResult() {

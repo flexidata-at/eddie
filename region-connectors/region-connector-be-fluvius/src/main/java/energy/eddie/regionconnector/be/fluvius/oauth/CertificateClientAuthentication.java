@@ -13,6 +13,7 @@ import com.nimbusds.jwt.JWTClaimNames;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.nimbusds.oauth2.sdk.auth.PrivateKeyJWT;
+import energy.eddie.regionconnector.be.fluvius.config.FluviusOAuthConfiguration.AssertionAlgorithm;
 import org.springframework.boot.ssl.SslBundle;
 
 import java.net.URI;
@@ -32,8 +33,14 @@ final class CertificateClientAuthentication {
     private final RSAPrivateKey privateKey;
     private final X509Certificate certificate;
     private final Base64URL thumbprint;
+    private final AssertionAlgorithm algorithm;
 
     CertificateClientAuthentication(String clientId, URI tokenEndpoint, SslBundle bundle) {
+        this(clientId, tokenEndpoint, bundle, AssertionAlgorithm.PS256);
+    }
+
+    CertificateClientAuthentication(String clientId, URI tokenEndpoint, SslBundle bundle, AssertionAlgorithm algorithm) {
+        this.algorithm = algorithm;
         this.clientId = clientId;
         this.tokenEndpoint = tokenEndpoint;
         try {
@@ -59,7 +66,7 @@ final class CertificateClientAuthentication {
             x509Certificate.checkValidity();
             this.privateKey = rsaPrivateKey;
             this.certificate = x509Certificate;
-            this.thumbprint = Base64URL.encode(MessageDigest.getInstance("SHA-256").digest(certificate.getEncoded()));
+            this.thumbprint = Base64URL.encode(MessageDigest.getInstance(algorithm == AssertionAlgorithm.RS256 ? "SHA-1" : "SHA-256").digest(certificate.getEncoded()));
         } catch (GeneralSecurityException exception) {
             throw new IllegalArgumentException("Cannot load Fluvius OAuth certificate credentials", exception);
         }
@@ -73,15 +80,19 @@ final class CertificateClientAuthentication {
                 .subject(clientId)
                 .audience(tokenEndpoint.toString())
                 .claim(JWTClaimNames.ISSUED_AT, now.getEpochSecond())
-                .claim(JWTClaimNames.NOT_BEFORE, now.getEpochSecond())
+                .claim(JWTClaimNames.NOT_BEFORE, now.minusSeconds(30).getEpochSecond())
                 .claim(JWTClaimNames.EXPIRATION_TIME, now.plusSeconds(300).getEpochSecond())
                 .jwtID(UUID.randomUUID().toString())
                 .build();
-        var header = new JWSHeader.Builder(JWSAlgorithm.PS256)
-                .type(JOSEObjectType.JWT)
-                .x509CertSHA256Thumbprint(thumbprint)
-                .build();
-        var assertion = new SignedJWT(header, claims);
+        var header = new JWSHeader.Builder(algorithm == AssertionAlgorithm.RS256 ? JWSAlgorithm.RS256 : JWSAlgorithm.PS256)
+                .type(JOSEObjectType.JWT);
+        if (algorithm == AssertionAlgorithm.RS256) {
+            // Existing Entra registrations use the SHA-1 certificate identifier, not a SHA-1 signature.
+            header.x509CertThumbprint(thumbprint);
+        } else {
+            header.x509CertSHA256Thumbprint(thumbprint);
+        }
+        var assertion = new SignedJWT(header.build(), claims);
         assertion.sign(new RSASSASigner(privateKey));
         return new PrivateKeyJWT(assertion);
     }

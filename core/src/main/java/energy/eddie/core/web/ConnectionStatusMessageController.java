@@ -14,7 +14,11 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static energy.eddie.regionconnector.shared.web.RestApiPaths.CONNECTION_STATUS_STREAM_BASE;
 
@@ -22,14 +26,23 @@ import static energy.eddie.regionconnector.shared.web.RestApiPaths.CONNECTION_ST
 public class ConnectionStatusMessageController {
     private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger(ConnectionStatusMessageController.class);
     private final Sinks.Many<ConnectionStatusMessage> messages = Sinks.many().replay().limit(100);
+    private final Map<String, ConnectionStatusMessage> latestMessagesByPermissionId = new ConcurrentHashMap<>();
 
 
     @GetMapping(value = CONNECTION_STATUS_STREAM_BASE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<Flux<ConnectionStatusMessage>> connectionStatusMessageByPermissionId(
             @RequestParam("permission-id") List<String> permissionId
     ) {
-        var filtered = messages.asFlux()
-                               .filter(message -> permissionId.contains(message.permissionId()));
+        var filtered = Flux.defer(() -> {
+            var lastSent = new HashMap<String, ConnectionStatusMessage>();
+            var latest = Flux.fromIterable(permissionId).mapNotNull(latestMessagesByPermissionId::get);
+            var updates = messages.asFlux()
+                    .filter(message -> permissionId.contains(message.permissionId()))
+                    // Do not replay an older buffered state after the current snapshot.
+                    .filter(message -> Objects.equals(latestMessagesByPermissionId.get(message.permissionId()), message));
+            return latest.concatWith(updates)
+                    .filter(message -> !Objects.equals(lastSent.put(message.permissionId(), message), message));
+        });
 
         return ResponseEntity.ok()
                              // Tell reverse proxies like Nginx not to buffer the response
@@ -46,6 +59,11 @@ public class ConnectionStatusMessageController {
                                          err
                                  )
                 )
-                .subscribe(messages::tryEmitNext);
+                .subscribe(this::emit);
+    }
+
+    private synchronized void emit(ConnectionStatusMessage message) {
+        latestMessagesByPermissionId.put(message.permissionId(), message);
+        messages.tryEmitNext(message);
     }
 }
