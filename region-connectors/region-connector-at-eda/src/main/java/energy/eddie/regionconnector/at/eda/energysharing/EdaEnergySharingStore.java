@@ -25,8 +25,8 @@ public class EdaEnergySharingStore {
     public void insert(EnergySharingRecord value) { entityManager.persist(value); entityManager.flush(); }
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public void update(String id, UnaryOperator<String> change) {
-        var record=repository.findLocked(id).orElseThrow();
-        record.payload(change.apply(record.payload()));
-        repository.saveAndFlush(record);
+        var row=repository.findLocked(id).orElseThrow();
+        row.payload(change.apply(row.payload()));
+        repository.saveAndFlush(row);
     }
 }
