@@ -208,6 +208,11 @@ val generateEDASchemaClasses = tasks.register<JavaExec>("generateEDASchemaClasse
     outputs.dir(generatedXJCJavaDir)
 }
 
+tasks.processResources {
+    dependsOn(validatedEDASchemas)
+    from(edaSchemaDir) { into("energy-sharing/xsd") }
+}
+
 
 val pontonUri: URI =
     URI.create("https://www.ponton.de/downloads/xp/${pontonVersion}/PontonXP-Messenger-${pontonVersion}-Linux.zip")
