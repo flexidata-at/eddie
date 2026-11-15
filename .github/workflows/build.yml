@@ -54,13 +54,14 @@ jobs:
                   with urllib.request.urlopen(request, timeout=30) as response:
                       return json.load(response)
               except urllib.error.HTTPError as error:
-                  raise SystemExit('Sonar diagnostics request failed with HTTP ' + str(error.code)) from None
+                  print(json.dumps({'diagnosticUnavailable': {'endpoint': path, 'httpStatus': error.code}}))
+                  return {}
 
           project = 'flexidata-at_eddie'
           analyses = read('project_analyses/search', {'project': project, 'ps': 1})
           latest = next(iter(analyses.get('analyses', [])), {})
           print(json.dumps({'mainAnalysis': {key: latest.get(key) for key in ('key', 'date', 'revision')}}))
-          gate = read('qualitygates/project_status', {'projectKey': project})['projectStatus']
+          gate = read('qualitygates/project_status', {'projectKey': project}).get('projectStatus', {})
           print(json.dumps({'qualityGate': gate.get('status'), 'conditions': [
               {key: condition.get(key) for key in ('metricKey', 'status', 'actualValue', 'errorThreshold')}
               for condition in gate.get('conditions', [])
