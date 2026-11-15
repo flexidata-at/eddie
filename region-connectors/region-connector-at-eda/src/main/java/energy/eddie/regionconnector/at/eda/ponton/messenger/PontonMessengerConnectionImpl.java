@@ -66,6 +66,28 @@ public class PontonMessengerConnectionImpl implements AutoCloseable, PontonMesse
     @Nullable
     private ECMPListHandler ecmpListHandler;
     private MessengerConnection messengerConnection;
+    @Nullable
+    private energy.eddie.regionconnector.at.eda.energysharing.EnergySharingMessageHandler energySharingHandler;
+
+    @Override
+    public boolean supportsEnergySharing() { return true; }
+
+    @Override
+    public void sendEnergySharing(OutboundMessage message) throws TransmissionException, ConnectionException {
+        lock.lock();
+        try {
+            ensureOpen();
+            // An ambiguous market-management send must never be blindly retried.
+            messengerConnection.sendMessage(message);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public void withEnergySharingHandler(energy.eddie.regionconnector.at.eda.energysharing.EnergySharingMessageHandler handler) {
+        energySharingHandler=handler;
+    }
 
     public PontonMessengerConnectionImpl(
             PontonXPAdapterConfiguration config,
@@ -267,6 +289,10 @@ public class PontonMessengerConnectionImpl implements AutoCloseable, PontonMesse
                 ))
                 .onAdapterStatusRequest(this::handleAdapterStatusRequest)
                 .onMessageStatusUpdate(outboundMessageStatusUpdate -> {
+                    if (energySharingHandler != null) {
+                        energySharingHandler.transportStatus(outboundMessageStatusUpdate.getStatusMetaData().getConversationId().getValue(),
+                                outboundMessageStatusUpdate.getResult().toString());
+                    }
                     if (outboundMessageStatusUpdateHandler != null) {
                         outboundMessageStatusUpdateHandler.onOutboundMessageStatusUpdate(outboundMessageStatusUpdate);
                     }
@@ -321,7 +347,16 @@ public class PontonMessengerConnectionImpl implements AutoCloseable, PontonMesse
               .addArgument(() -> inboundMessage.getInboundMetaData().getConversationId().getValue())
               .log("Received message type: '{}' (version '{}') with ConversationId: '{}'");
 
-        try (InputStream inputStream = inboundMessage.createInputStream()) {
+        try (InputStream incomingStream = inboundMessage.createInputStream()) {
+            InputStream inputStream=incomingStream;
+            if (energySharingHandler != null && energySharingHandler.accepts(messageType)) {
+                byte[] bytes=incomingStream.readAllBytes();
+                if (energySharingHandler.handle(messageType,bytes)) {
+                    return InboundMessageStatusUpdate.newBuilder().setInboundMessage(inboundMessage)
+                            .setStatus(InboundStatusEnum.SUCCESS).setStatusText("Energy sharing message durably processed").build();
+                }
+                inputStream=new java.io.ByteArrayInputStream(bytes);
+            }
             var result = switch (messageType) {
                 case MessageCodes.Notification.ANSWER ->
                         handleNotification(inputStream, NotificationMessageType.CCMO_ANSWER);
@@ -380,6 +415,14 @@ public class PontonMessengerConnectionImpl implements AutoCloseable, PontonMesse
                                              .setStatus(InboundStatusEnum.TEMPORARY_ERROR)
                                              .setStatusText(e.getMessage())
                                              .build();
+        } catch (energy.eddie.api.agnostic.energysharing.EnergySharingException e) {
+            LOGGER.warn("Rejected energy sharing reply that failed schema or authorized-scope validation");
+            return InboundMessageStatusUpdate.newBuilder().setInboundMessage(inboundMessage)
+                    .setStatus(InboundStatusEnum.REJECTED).setStatusText("Market message failed schema or authorized-scope validation").build();
+        } catch (RuntimeException e) {
+            LOGGER.error("Could not persist/process inbound market message",e);
+            return InboundMessageStatusUpdate.newBuilder().setInboundMessage(inboundMessage)
+                    .setStatus(InboundStatusEnum.TEMPORARY_ERROR).setStatusText("Energy sharing processing failed; retry required").build();
         }
     }
 

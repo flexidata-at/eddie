@@ -1,0 +1,505 @@
+{
+  "JOIN": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "meteringPointId",
+      "start",
+      "energyDirection",
+      "participationFactor"
+    ],
+    "properties": {
+      "permissionAdministratorId": {
+        "type": "string",
+        "title": "Grid operator",
+        "description": "Must match the authorized server binding"
+      },
+      "meteringPointId": {
+        "type": "string",
+        "title": "Metering point",
+        "pattern": "^[A-Za-z0-9]{1,33}$"
+      },
+      "start": {
+        "type": "string",
+        "title": "Effective date",
+        "format": "date"
+      },
+      "energyDirection": {
+        "type": "string",
+        "title": "Energy direction",
+        "enum": [
+          "CONSUMPTION",
+          "GENERATION"
+        ]
+      },
+      "participationFactor": {
+        "type": "integer",
+        "title": "Participation factor (%)",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "allocationFactor": {
+        "type": "number",
+        "title": "Static allocation share (%)",
+        "minimum": 0,
+        "maximum": 100,
+        "multipleOf": 0.0001
+      },
+      "distributionModel": {
+        "type": "string",
+        "title": "Distribution model",
+        "enum": [
+          "D",
+          "S"
+        ]
+      },
+      "meteringInterval": {
+        "type": "string",
+        "title": "Metering interval",
+        "enum": [
+          "QH",
+          "H",
+          "D",
+          "V"
+        ]
+      },
+      "transmissionCycle": {
+        "type": "string",
+        "title": "Transmission cycle",
+        "enum": [
+          "D",
+          "M",
+          "V"
+        ]
+      },
+      "purpose": {
+        "type": "string",
+        "title": "Purpose",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "additionalData": {
+        "type": "array",
+        "title": "Additional EDA parameters",
+        "maxItems": 1000,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Parameter name",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "value": {
+              "type": "string",
+              "title": "Parameter value",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        }
+      }
+    }
+  },
+  "LEAVE": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "meteringPointId",
+      "consentId",
+      "end"
+    ],
+    "properties": {
+      "permissionAdministratorId": {
+        "type": "string",
+        "title": "Grid operator",
+        "description": "Must match the authorized server binding"
+      },
+      "meteringPointId": {
+        "type": "string",
+        "title": "Metering point",
+        "pattern": "^[A-Za-z0-9]{1,33}$"
+      },
+      "consentId": {
+        "type": "string",
+        "title": "Consent ID",
+        "pattern": "^[A-Za-z0-9]{1,35}$"
+      },
+      "end": {
+        "type": "string",
+        "title": "End date",
+        "format": "date"
+      },
+      "reasonKey": {
+        "type": "integer",
+        "title": "Termination reason code",
+        "minimum": 0,
+        "maximum": 9
+      },
+      "reason": {
+        "type": "string",
+        "title": "Termination reason",
+        "maxLength": 50
+      }
+    }
+  },
+  "SYNC_MASTER_DATA": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "permissionAdministratorId": {
+        "type": "string",
+        "title": "Grid operator",
+        "description": "Must match the authorized server binding"
+      },
+      "start": {
+        "type": "string",
+        "title": "Effective date",
+        "format": "date",
+        "description": "Defaults to 30 calendar days before submission"
+      },
+      "end": {
+        "type": "string",
+        "title": "End date",
+        "format": "date",
+        "description": "Defaults to 30 calendar days after submission"
+      },
+      "additionalData": {
+        "type": "array",
+        "title": "Additional EDA parameters",
+        "maxItems": 1000,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Parameter name",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "value": {
+              "type": "string",
+              "title": "Parameter value",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        }
+      }
+    }
+  },
+  "CHANGE_PARTICIPATION_FACTOR": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "meteringPointId",
+      "start",
+      "timePeriods"
+    ],
+    "properties": {
+      "permissionAdministratorId": {
+        "type": "string",
+        "title": "Grid operator",
+        "description": "Must match the authorized server binding"
+      },
+      "meteringPointId": {
+        "type": "string",
+        "title": "Metering point",
+        "pattern": "^[A-Za-z0-9]{1,33}$"
+      },
+      "consentId": {
+        "type": "string",
+        "title": "Consent ID",
+        "pattern": "^[A-Za-z0-9]{1,35}$"
+      },
+      "start": {
+        "type": "string",
+        "title": "Effective date",
+        "format": "date"
+      },
+      "distributionModel": {
+        "type": "string",
+        "title": "Distribution model",
+        "enum": [
+          "D",
+          "S"
+        ]
+      },
+      "communityType": {
+        "type": "string",
+        "title": "Community type",
+        "enum": [
+          "GC",
+          "RC_R",
+          "RC_L",
+          "CC",
+          "SC",
+          "PP"
+        ]
+      },
+      "zoneLevel": {
+        "type": "string",
+        "title": "Zone level",
+        "enum": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7"
+        ]
+      },
+      "timePeriods": {
+        "type": "array",
+        "title": "Effective periods (including future scheduled changes)",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end",
+            "activate",
+            "dataType",
+            "participationFactor"
+          ],
+          "properties": {
+            "start": {
+              "type": "string",
+              "title": "Valid from",
+              "format": "date"
+            },
+            "end": {
+              "type": "string",
+              "title": "Valid through",
+              "format": "date"
+            },
+            "activate": {
+              "type": "string",
+              "title": "Original activation date",
+              "format": "date"
+            },
+            "deactivate": {
+              "type": "string",
+              "title": "Deactivation date",
+              "format": "date"
+            },
+            "dataType": {
+              "type": "string",
+              "title": "EDA data type",
+              "minLength": 1,
+              "maxLength": 30
+            },
+            "participationFactor": {
+              "type": "integer",
+              "title": "Participation factor (%)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "energyDirection": {
+              "type": "string",
+              "title": "Energy direction",
+              "enum": [
+                "CONSUMPTION",
+                "GENERATION"
+              ]
+            },
+            "transmissionCycle": {
+              "type": "string",
+              "title": "Transmission cycle",
+              "enum": [
+                "D",
+                "M",
+                "V"
+              ]
+            },
+            "purpose": {
+              "type": "string",
+              "title": "Purpose",
+              "maxLength": 100
+            },
+            "techCode": {
+              "type": "string",
+              "title": "Technology code",
+              "maxLength": 10
+            },
+            "fuelCode": {
+              "type": "string",
+              "title": "Fuel code",
+              "maxLength": 10
+            }
+          }
+        }
+      }
+    },
+    "description": "Send between 09:00 and 17:00 Europe/Vienna for the next calendar day. Include all future scheduled changes; one change per meter/community/day."
+  },
+  "CHANGE_ALLOCATION": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "meteringPointId",
+      "start",
+      "timePeriods",
+      "distributionModel"
+    ],
+    "properties": {
+      "permissionAdministratorId": {
+        "type": "string",
+        "title": "Grid operator",
+        "description": "Must match the authorized server binding"
+      },
+      "meteringPointId": {
+        "type": "string",
+        "title": "Metering point",
+        "pattern": "^[A-Za-z0-9]{1,33}$"
+      },
+      "consentId": {
+        "type": "string",
+        "title": "Consent ID",
+        "pattern": "^[A-Za-z0-9]{1,35}$"
+      },
+      "start": {
+        "type": "string",
+        "title": "Effective date",
+        "format": "date"
+      },
+      "distributionModel": {
+        "type": "string",
+        "title": "Distribution model",
+        "enum": [
+          "D",
+          "S"
+        ]
+      },
+      "communityType": {
+        "type": "string",
+        "title": "Community type",
+        "enum": [
+          "GC",
+          "RC_R",
+          "RC_L",
+          "CC",
+          "SC",
+          "PP"
+        ]
+      },
+      "zoneLevel": {
+        "type": "string",
+        "title": "Zone level",
+        "enum": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7"
+        ]
+      },
+      "timePeriods": {
+        "type": "array",
+        "title": "Effective periods (including future scheduled changes)",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end",
+            "activate",
+            "dataType",
+            "allocationFactor"
+          ],
+          "properties": {
+            "start": {
+              "type": "string",
+              "title": "Valid from",
+              "format": "date"
+            },
+            "end": {
+              "type": "string",
+              "title": "Valid through",
+              "format": "date"
+            },
+            "activate": {
+              "type": "string",
+              "title": "Original activation date",
+              "format": "date"
+            },
+            "deactivate": {
+              "type": "string",
+              "title": "Deactivation date",
+              "format": "date"
+            },
+            "dataType": {
+              "type": "string",
+              "title": "EDA data type",
+              "minLength": 1,
+              "maxLength": 30
+            },
+            "participationFactor": {
+              "type": "integer",
+              "title": "Participation factor (%)",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "allocationFactor": {
+              "type": "number",
+              "title": "Static allocation share (%)",
+              "minimum": 0,
+              "maximum": 100,
+              "multipleOf": 0.0001
+            },
+            "energyDirection": {
+              "type": "string",
+              "title": "Energy direction",
+              "enum": [
+                "CONSUMPTION",
+                "GENERATION"
+              ]
+            },
+            "transmissionCycle": {
+              "type": "string",
+              "title": "Transmission cycle",
+              "enum": [
+                "D",
+                "M",
+                "V"
+              ]
+            },
+            "purpose": {
+              "type": "string",
+              "title": "Purpose",
+              "maxLength": 100
+            },
+            "techCode": {
+              "type": "string",
+              "title": "Technology code",
+              "maxLength": 10
+            },
+            "fuelCode": {
+              "type": "string",
+              "title": "Fuel code",
+              "maxLength": 10
+            }
+          }
+        }
+      }
+    },
+    "description": "Send between 09:00 and 17:00 Europe/Vienna for the next calendar day. Include all future scheduled changes; one change per meter/community/day."
+  }
+}

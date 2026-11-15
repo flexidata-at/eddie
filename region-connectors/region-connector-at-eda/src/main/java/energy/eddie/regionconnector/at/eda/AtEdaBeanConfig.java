@@ -55,7 +55,8 @@ import static energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata.AT_
 import static energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata.TRANSMISSION_CYCLE;
 
 @Configuration
-@EnableConfigurationProperties({AtConfiguration.class, PontonXPAdapterConfiguration.class})
+@EnableConfigurationProperties({AtConfiguration.class, PontonXPAdapterConfiguration.class,
+        energy.eddie.regionconnector.at.eda.energysharing.EdaEnergySharingConfiguration.class})
 public class AtEdaBeanConfig {
     @Bean
     public EdaAdapter edaAdapter(

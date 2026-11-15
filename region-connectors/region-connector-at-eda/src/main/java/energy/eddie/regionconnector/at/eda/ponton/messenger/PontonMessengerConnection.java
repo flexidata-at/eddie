@@ -13,6 +13,15 @@ import energy.eddie.regionconnector.at.eda.requests.CPRequestCR;
 import java.time.Duration;
 
 public interface PontonMessengerConnection extends MessengerHealth, MessengerMonitor {
+    default boolean supportsEnergySharing() { return false; }
+
+    default void sendEnergySharing(de.ponton.xp.adapter.api.messages.OutboundMessage message) throws TransmissionException, ConnectionException {
+        throw new ConnectionException("Energy sharing transport is unavailable",new UnsupportedOperationException());
+    }
+
+    default void withEnergySharingHandler(energy.eddie.regionconnector.at.eda.energysharing.EnergySharingMessageHandler handler) {
+        // Development transports do not claim production transport support.
+    }
     static PontonMessengerConnectionBuilder newBuilder() {
         return new PontonMessengerConnectionBuilder();
     }
