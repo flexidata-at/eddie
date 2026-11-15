@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.test.StepVerifier;
 import tools.jackson.databind.node.JsonNodeFactory;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -29,6 +30,35 @@ import static org.mockito.Mockito.when;
 class ConnectionStatusMessageHandlerTest {
     @Mock
     private PermissionRequestRepository<PermissionRequest> repository;
+
+    @Test
+    void streamReplaysPersistedStatusAfterRestart() {
+        var permission = new SimplePermissionRequest("pid", "cid", "dnid", PermissionProcessStatus.ACCEPTED);
+        var handler = new ConnectionStatusMessageHandler<>(new EventBusImpl(), repository, pr -> "", pr -> null,
+                () -> List.of(permission));
+
+        StepVerifier.create(handler.getConnectionStatusMessageStream())
+                .assertNext(message -> assertAll(
+                        () -> assertEquals("pid", message.permissionId()),
+                        () -> assertEquals(PermissionProcessStatus.ACCEPTED, message.status())))
+                .thenCancel()
+                .verify();
+    }
+
+    @Test
+    void liveEventUsesNewStatusEvenWhenPersistedProjectionIsStale() {
+        var permission = new SimplePermissionRequest("pid", "cid", "dnid",
+                PermissionProcessStatus.SENT_TO_PERMISSION_ADMINISTRATOR);
+        when(repository.findByPermissionId("pid")).thenReturn(Optional.of(permission));
+        var eventBus = new EventBusImpl();
+        var handler = new ConnectionStatusMessageHandler<>(eventBus, repository, pr -> "");
+        eventBus.emit(new SimpleEvent("pid", PermissionProcessStatus.ACCEPTED));
+
+        StepVerifier.create(handler.getConnectionStatusMessageStream())
+                .then(handler::close)
+                .assertNext(message -> assertEquals(PermissionProcessStatus.ACCEPTED, message.status()))
+                .verifyComplete();
+    }
 
     @Test
     void testAccept_emitsStatusMessage() {

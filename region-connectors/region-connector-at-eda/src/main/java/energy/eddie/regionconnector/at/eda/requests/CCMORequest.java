@@ -102,9 +102,12 @@ public record CCMORequest(
         return configuration.eligiblePartyId();
     }
 
-    @Nullable
     public String energyCommunityId() {
-        return configuration.energyCommunityId();
+        if (!(dataNeed instanceof CESUJoinRequestDataNeed cesuNeed)) {
+            throw new IllegalArgumentException("An energy community ID requires a CESU data need");
+        }
+        return configuration.resolveEnergyCommunityId(cesuNeed.energyCommunityId())
+                            .orElseThrow(() -> new IllegalArgumentException("The configured market party cannot act for this energy community"));
     }
 
     /**

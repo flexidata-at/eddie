@@ -9,6 +9,7 @@ import energy.eddie.regionconnector.es.datadis.dtos.ContractDetails;
 import energy.eddie.regionconnector.es.datadis.dtos.Supply;
 import energy.eddie.regionconnector.es.datadis.dtos.authorizations.AuthorizedCups;
 import energy.eddie.regionconnector.es.datadis.dtos.authorizations.UserAuthorizationsResponse;
+import energy.eddie.regionconnector.es.datadis.dtos.exceptions.AuthorizationNotVisibleException;
 import energy.eddie.regionconnector.es.datadis.dtos.exceptions.NoContractsException;
 import energy.eddie.regionconnector.es.datadis.dtos.exceptions.NoSuppliesException;
 import energy.eddie.regionconnector.es.datadis.dtos.exceptions.NoSupplyForMeteringPointException;
@@ -86,6 +87,6 @@ public class AccountingPointDataService {
         LOGGER.atWarn()
               .addArgument(permissionRequest::permissionId)
               .log("Could not find authorized cups for permission request {}");
-        return Mono.empty();
+        return Mono.error(new AuthorizationNotVisibleException(permissionRequest.permissionId()));
     }
 }

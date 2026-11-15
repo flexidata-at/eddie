@@ -4,6 +4,8 @@
 package energy.eddie.regionconnector.at.eda.handlers;
 
 import energy.eddie.cim.agnostic.PermissionProcessStatus;
+import energy.eddie.dataneeds.needs.CESUJoinRequestDataNeed;
+import energy.eddie.dataneeds.services.DataNeedsService;
 import energy.eddie.regionconnector.at.api.AtPermissionRequest;
 import energy.eddie.regionconnector.at.api.AtPermissionRequestRepository;
 import energy.eddie.regionconnector.at.eda.EdaAdapter;
@@ -31,6 +33,7 @@ public class ExternalTerminationHandler implements EventHandler<TerminationEvent
     private final AtConfiguration atConfiguration;
     private final EdaGroupingIdFactory groupingIdFactory;
     private final EdaAdapter edaAdapter;
+    private final DataNeedsService dataNeedsService;
 
     public ExternalTerminationHandler(
             Outbox outbox,
@@ -38,13 +41,15 @@ public class ExternalTerminationHandler implements EventHandler<TerminationEvent
             AtPermissionRequestRepository repository,
             AtConfiguration atConfiguration,
             EdaGroupingIdFactory groupingIdFactory,
-            EdaAdapter edaAdapter
+            EdaAdapter edaAdapter,
+            @SuppressWarnings("SpringJavaInjectionPointsAutowiringInspection") DataNeedsService dataNeedsService
     ) {
         this.outbox = outbox;
         this.repository = repository;
         this.atConfiguration = atConfiguration;
         this.groupingIdFactory = groupingIdFactory;
         this.edaAdapter = edaAdapter;
+        this.dataNeedsService = dataNeedsService;
         eventBus.filteredFlux(TerminationEvent.class)
                 .subscribe(this::accept);
     }
@@ -59,6 +64,13 @@ public class ExternalTerminationHandler implements EventHandler<TerminationEvent
         }
         AtPermissionRequest permissionRequest = request.get();
         try {
+            var dataNeed = dataNeedsService.getById(permissionRequest.dataNeedId());
+            if (dataNeed instanceof CESUJoinRequestDataNeed cesuNeed) {
+                if (atConfiguration.resolveEnergyCommunityId(cesuNeed.energyCommunityId()).isEmpty()
+                        || permissionRequest.consentId().isEmpty() || permissionRequest.meteringPointId().isEmpty()) {
+                    throw new IllegalArgumentException("An authorized community, consent ID and accounting point are required for CESU termination");
+                }
+            }
             var consentEnd = ZonedDateTime.now(AT_ZONE_ID);
             var start = permissionRequest.start().atStartOfDay(AT_ZONE_ID);
             if (consentEnd.isBefore(start)) {

@@ -15,6 +15,7 @@ import energy.eddie.regionconnector.es.datadis.consumer.PermissionRequestConsume
 import energy.eddie.regionconnector.es.datadis.dtos.AllowedGranularity;
 import energy.eddie.regionconnector.es.datadis.dtos.CreatedPermissionRequest;
 import energy.eddie.regionconnector.es.datadis.dtos.PermissionRequestForCreation;
+import energy.eddie.regionconnector.es.datadis.dtos.exceptions.AuthorizationNotVisibleException;
 import energy.eddie.regionconnector.es.datadis.exceptions.EsValidationException;
 import energy.eddie.regionconnector.es.datadis.permission.events.EsCreatedEvent;
 import energy.eddie.regionconnector.es.datadis.permission.events.EsMalformedEvent;
@@ -30,7 +31,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import reactor.util.retry.Retry;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.*;
 
@@ -41,6 +44,8 @@ import static energy.eddie.regionconnector.es.datadis.DatadisRegionConnectorMeta
 public class PermissionRequestService {
     private static final Logger LOGGER = LoggerFactory.getLogger(PermissionRequestService.class);
     private static final String DATA_NEED_ID = "dataNeedIds";
+    private static final int AUTHORIZATION_VISIBILITY_RETRIES = 18;
+    private static final Duration AUTHORIZATION_VISIBILITY_RETRY_DELAY = Duration.ofSeconds(10);
     private final EsPermissionRequestRepository repository;
     private final AccountingPointDataService accountingPointDataService;
     private final PermissionRequestConsumer permissionRequestConsumer;
@@ -75,6 +80,14 @@ public class PermissionRequestService {
                       .log("Got request to accept permission {}");
                 accountingPointDataService
                         .fetchAccountingPointDataForPermissionRequest(permissionRequest)
+                        .retryWhen(Retry.fixedDelay(AUTHORIZATION_VISIBILITY_RETRIES,
+                                                    AUTHORIZATION_VISIBILITY_RETRY_DELAY)
+                                        .filter(AuthorizationNotVisibleException.class::isInstance)
+                                        .doBeforeRetry(retrySignal -> LOGGER.atInfo()
+                                                .addArgument(permissionRequest::permissionId)
+                                                .addArgument(retrySignal.totalRetries() + 1)
+                                                .addArgument(AUTHORIZATION_VISIBILITY_RETRIES)
+                                                .log("Datadis authorization for permission request {} is not visible yet; retrying ({}/{})")))
                         .subscribe(accountingPointData ->
                                            permissionRequestConsumer.acceptPermission(permissionRequest,
                                                                                       accountingPointData),

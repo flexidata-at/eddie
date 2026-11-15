@@ -8,6 +8,7 @@ import energy.eddie.api.agnostic.data.needs.DataNeedCalculationService;
 import energy.eddie.api.agnostic.process.model.events.PermissionEventRepository;
 import energy.eddie.api.cim.config.CommonInformationModelConfiguration;
 import energy.eddie.cim.agnostic.OpaqueEnvelope;
+import energy.eddie.cim.agnostic.PermissionProcessStatus;
 import energy.eddie.cim.agnostic.RawDataMessage;
 import energy.eddie.cim.v1_12.ack.AcknowledgementEnvelope;
 import energy.eddie.cim.v1_12.recmmoe.RECMMOEEnvelope;
@@ -49,6 +50,7 @@ import tools.jackson.module.jakarta.xmlbind.JakartaXmlBindAnnotationModule;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.EnumSet;
 import java.util.function.Supplier;
 
 import static energy.eddie.regionconnector.aiida.AiidaRegionConnectorMetadata.MQTT_CLIENT_ID;
@@ -120,7 +122,8 @@ public class AiidaBeanConfig {
             AiidaPermissionRequestViewRepository repository
     ) {
         // AIIDA does not populate additional info for messages
-        return new ConnectionStatusMessageHandler<>(eventBus, repository, request -> "");
+        return new ConnectionStatusMessageHandler<>(eventBus, repository, request -> "", request -> null,
+                () -> repository.findByStatusIn(EnumSet.allOf(PermissionProcessStatus.class)));
     }
 
     @Bean
@@ -138,7 +141,9 @@ public class AiidaBeanConfig {
                                                             configuration.customerId(),
                                                             cimConfig,
                                                             transmissionScheduleProvider,
-                                                            REGION_CONNECTOR_ZONE_ID);
+                                                            REGION_CONNECTOR_ZONE_ID,
+                                                            () -> repository.findByStatusIn(
+                                                                    EnumSet.allOf(PermissionProcessStatus.class)));
     }
 
     @Bean

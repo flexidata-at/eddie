@@ -6,6 +6,7 @@ package energy.eddie.regionconnector.at.eda.dto;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface EdaConsumptionRecord {
     String messageId();
@@ -14,9 +15,17 @@ public interface EdaConsumptionRecord {
 
     String meteringPoint();
 
+    default Optional<String> energyCommunityId() {
+        return Optional.empty();
+    }
+
     LocalDate startDate();
 
     LocalDate endDate();
+
+    default LocalDate lastReadingDate() {
+        return endDate();
+    }
 
     String senderMessageAddress();
 

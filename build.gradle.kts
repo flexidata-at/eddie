@@ -48,6 +48,17 @@ tasks.register<PnpmTask>("pnpmBuild") {
     pnpmCommand.set(listOf("run", "build"))
 }
 
+val componentTests by tasks.registering(PnpmTask::class) {
+    group = "verification"
+    description = "Tests embedded permission forms and strict-CSP event handling"
+    dependsOn("pnpmInstall")
+    pnpmCommand.set(listOf("run", "test:components"))
+}
+
+tasks.named("check") {
+    dependsOn(componentTests)
+}
+
 interface InjectedFsOps {
     @get:Inject val fs: FileSystemOperations
 }

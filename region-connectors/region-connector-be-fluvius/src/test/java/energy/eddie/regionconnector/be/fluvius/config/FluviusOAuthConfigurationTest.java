@@ -23,6 +23,7 @@ class FluviusOAuthConfigurationTest {
         assertEquals(FluviusOAuthConfiguration.AuthenticationMethod.CLIENT_SECRET, config.authenticationMethod());
         assertEquals("fluvius", config.sslBundle());
         assertEquals("tenant", config.tenantId());
+        assertEquals(FluviusOAuthConfiguration.AssertionAlgorithm.PS256, config.assertionAlgorithm());
     }
 
     @Test
@@ -35,6 +36,21 @@ class FluviusOAuthConfigurationTest {
         assertEquals(FluviusOAuthConfiguration.AuthenticationMethod.CERTIFICATE, config.authenticationMethod());
         assertEquals("live-certificate", config.sslBundle());
         assertNull(config.clientSecret());
+    }
+
+    @Test
+    void existingLiveRegistrationCanSelectRs256() {
+        var properties = properties();
+        properties.put(PREFIX + "authentication-method", "certificate");
+        properties.put(PREFIX + "assertion-algorithm", "RS256");
+        assertEquals(FluviusOAuthConfiguration.AssertionAlgorithm.RS256, bind(properties).assertionAlgorithm());
+    }
+
+    @Test
+    void unsupportedAssertionAlgorithmIsRejected() {
+        var properties = properties();
+        properties.put(PREFIX + "assertion-algorithm", "HS256");
+        assertThrows(org.springframework.boot.context.properties.bind.BindException.class, () -> bind(properties));
     }
 
     @ParameterizedTest

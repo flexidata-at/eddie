@@ -4,10 +4,13 @@
 package energy.eddie.regionconnector.at.eda.services;
 
 import energy.eddie.cim.agnostic.PermissionProcessStatus;
+import energy.eddie.dataneeds.needs.CESUJoinRequestDataNeed;
+import energy.eddie.dataneeds.services.DataNeedsService;
 import energy.eddie.regionconnector.at.api.AtPermissionRequest;
 import energy.eddie.regionconnector.at.api.AtPermissionRequestProjection;
 import energy.eddie.regionconnector.at.api.AtPermissionRequestRepository;
 import energy.eddie.regionconnector.at.eda.EdaAdapter;
+import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
 import energy.eddie.regionconnector.at.eda.dto.EdaCMRevoke;
 import energy.eddie.regionconnector.at.eda.permission.request.EdaPermissionRequest;
 import energy.eddie.regionconnector.at.eda.permission.request.events.SimpleEvent;
@@ -23,10 +26,18 @@ public class RevocationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(RevocationService.class);
     private final AtPermissionRequestRepository repository;
     private final Outbox outbox;
+    private final DataNeedsService dataNeedsService;
+    private final AtConfiguration configuration;
 
-    public RevocationService(EdaAdapter edaAdapter, AtPermissionRequestRepository repository, Outbox outbox) {
+    public RevocationService(
+            EdaAdapter edaAdapter, AtPermissionRequestRepository repository, Outbox outbox,
+            @SuppressWarnings("SpringJavaInjectionPointsAutowiringInspection") DataNeedsService dataNeedsService,
+            AtConfiguration configuration
+    ) {
         this.repository = repository;
         this.outbox = outbox;
+        this.dataNeedsService = dataNeedsService;
+        this.configuration = configuration;
         edaAdapter.getCMRevokeStream()
                   .subscribe(this::onRevocation);
     }
@@ -35,8 +46,18 @@ public class RevocationService {
         String consentId = cmRevoke.consentId();
         var optionalRequest = repository.findByConsentId(consentId);
         if (optionalRequest.isPresent()) {
-            var projection = EdaPermissionRequest.fromProjection(optionalRequest.get());
-            revoke(projection);
+            var projection = optionalRequest.get();
+            var need = dataNeedsService.findById(projection.getDataNeedId());
+            if (need.orElse(null) instanceof CESUJoinRequestDataNeed cesuNeed) {
+                if (configuration.isEnergyCommunityMarketParty(cmRevoke.receiverMessageAddress())
+                        && configuration.resolveEnergyCommunityId(cesuNeed.energyCommunityId()).isPresent()
+                        && cmRevoke.meteringPoint().equals(projection.getMeteringPointId())
+                        && projection.getDsoId().equals(cmRevoke.senderMessageAddress())) {
+                    revoke(EdaPermissionRequest.fromProjection(projection), true);
+                }
+            } else if (need.isPresent()) {
+                revoke(EdaPermissionRequest.fromProjection(projection), false);
+            }
             return;
         }
         LOGGER.atWarn()
@@ -47,14 +68,18 @@ public class RevocationService {
         if (requests.isEmpty()) {
             LOGGER.error("Got Revoke Message with unknown consent id: {}; Could not revoke.", consentId);
         } else {
-            // Revoke every permission since we do not know which permission request was actually revoked
-            requests.forEach(request ->
-                                     revoke(EdaPermissionRequest.fromProjection(request)));
+            // The shared market-party receiver cannot identify the process type. Preserve the
+            // ordinary metering-data fallback, but never revoke a CESU without its consent ID.
+            requests.stream()
+                    .filter(request -> dataNeedsService.findById(request.getDataNeedId())
+                            .filter(need -> !(need instanceof CESUJoinRequestDataNeed)).isPresent())
+                    .forEach(request -> revoke(EdaPermissionRequest.fromProjection(request), false));
         }
     }
 
-    private void revoke(AtPermissionRequest permissionRequest) {
-        if (permissionRequest.status() != PermissionProcessStatus.ACCEPTED) {
+    private void revoke(AtPermissionRequest permissionRequest, boolean community) {
+        if (permissionRequest.status() != PermissionProcessStatus.ACCEPTED
+                && (!community || permissionRequest.status() != PermissionProcessStatus.FULFILLED)) {
             return;
         }
         outbox.commit(new SimpleEvent(permissionRequest.permissionId(), PermissionProcessStatus.REVOKED));

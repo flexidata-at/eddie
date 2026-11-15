@@ -71,9 +71,9 @@ class PermissionRequestForm extends PermissionRequestFormBase {
     const formData = new FormData(event.target);
 
     const jsonData = {
-      meteringPointId: !!formData.get("meteringPointId")
-        ? formData.get("meteringPointId")
-        : null,
+      // A service-provided point is locked; disabled inputs are absent from FormData.
+      meteringPointId:
+        this.accountingPointId || formData.get("meteringPointId") || null,
       dsoId: this.companyId,
       connectionId: this.connectionId,
       dataNeedIds: this._dataNeedIds,

@@ -12,6 +12,10 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
+import java.util.Optional;
+import java.util.Map;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AtConfigurationTest {
@@ -37,6 +41,18 @@ class AtConfigurationTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBean(AtConfiguration.class).conversationIdPrefix()).isEqualTo("DEV1");
                 });
+    }
+
+    @Test
+    void deployedConversationPrefixEnvironmentVariable_isBound() {
+        contextRunner.withInitializer(context -> context.getEnvironment().getPropertySources().addFirst(
+                new SystemEnvironmentPropertySource("deployment", Map.of(
+                        "REGION_CONNECTOR_AT_EDA_CONVERSATION_ID_PREFIX", "DATADEV"
+                ))
+        )).run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(AtConfiguration.class).conversationIdPrefix()).isEqualTo("DATADEV");
+        });
     }
 
     @ParameterizedTest
@@ -73,6 +89,53 @@ class AtConfigurationTest {
         contextRunner
                 .withPropertyValues(PREFIX + "eligibleparty.id=")
                 .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void atConfiguration_bindsExplicitCommunityAllowlistWithoutLegacyDefault() {
+        contextRunner.withPropertyValues(
+                PREFIX + "allowed-energy-community-ids=community-a,community-b"
+        ).run(context -> {
+            assertThat(context).hasNotFailed();
+            var configuration = context.getBean(AtConfiguration.class);
+            assertThat(configuration.resolveEnergyCommunityId(Optional.of("community-b"))).contains("community-b");
+            assertThat(configuration.resolveEnergyCommunityId(Optional.of("other-community"))).isEmpty();
+            assertThat(configuration.resolveEnergyCommunityId(Optional.empty())).isEmpty();
+            assertThat(configuration.isEnergyCommunityMarketParty("RC123456")).isFalse();
+            assertThat(configuration.isEnergyCommunityMarketParty("EP123456")).isTrue();
+        });
+    }
+
+    @Test
+    void legacyCommunityConfiguration_usesEligiblePartyAndDefaultCommunity() {
+        contextRunner.withPropertyValues(PREFIX + "energy-community-id=community-a").run(context -> {
+            assertThat(context).hasNotFailed();
+            var configuration = context.getBean(AtConfiguration.class);
+            assertThat(configuration.supportsEnergyCommunity()).isTrue();
+            assertThat(configuration.resolveEnergyCommunityId(Optional.empty())).contains("community-a");
+            assertThat(configuration.resolveEnergyCommunityId(Optional.of("community-b"))).isEmpty();
+            assertThat(configuration.eligiblePartyId()).isEqualTo("EP123456");
+            assertThat(configuration.isEnergyCommunityMarketParty("EP123456")).isTrue();
+            assertThat(configuration.isEnergyCommunityMarketParty("RC123456")).isFalse();
+        });
+    }
+
+    @Test
+    void legacyConstructor_preservesConversationPrefixArgument() {
+        var configuration = new AtConfiguration("EP123456", "community-a", "DEV");
+        assertThat(configuration.conversationIdPrefix()).isEqualTo("DEV");
+        assertThat(configuration.eligiblePartyId()).isEqualTo("EP123456");
+    }
+
+    @Test
+    void missingCommunityConfiguration_doesNotEnableCommunityRequests() {
+        contextRunner.run(context -> {
+            assertThat(context).hasNotFailed();
+            var configuration = context.getBean(AtConfiguration.class);
+            assertThat(configuration.supportsEnergyCommunity()).isFalse();
+            assertThat(configuration.isEnergyCommunityMarketParty("EP123456")).isFalse();
+            assertThat(configuration.resolveEnergyCommunityId(Optional.of("community-a"))).isEmpty();
+        });
     }
 
     @Configuration(proxyBeanMethods = false)

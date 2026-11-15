@@ -129,7 +129,20 @@ class EddieConnectButton extends LitElement {
     flagStyles,
     css`
       :host {
-        color: black;
+        color: #17212b;
+        color-scheme: light;
+        --sl-color-neutral-0: #ffffff;
+        --sl-color-neutral-50: #f8fafc;
+        --sl-color-neutral-100: #f1f5f9;
+        --sl-color-neutral-200: #e2e8f0;
+        --sl-color-neutral-300: #cbd5e1;
+        --sl-color-neutral-400: #94a3b8;
+        --sl-color-neutral-500: #64748b;
+        --sl-color-neutral-600: #475569;
+        --sl-color-neutral-700: #334155;
+        --sl-color-neutral-800: #1e293b;
+        --sl-color-neutral-900: #0f172a;
+        --sl-color-neutral-950: #020617;
         font-family:
           -apple-system,
           BlinkMacSystemFont,
@@ -169,6 +182,20 @@ class EddieConnectButton extends LitElement {
         align-items: end;
         justify-content: space-between;
         gap: 1rem;
+      }
+
+      sl-dialog {
+        color: #17212b;
+        --sl-panel-background-color: #ffffff;
+      }
+
+      sl-dialog h3,
+      sl-dialog p,
+      sl-dialog dl,
+      sl-dialog dt,
+      sl-dialog dd,
+      sl-dialog small {
+        color: #17212b;
       }
 
       .version-indicator {
@@ -610,7 +637,9 @@ class EddieConnectButton extends LitElement {
     }
 
     this.dispatchEvent(dialogOpenEvent);
-    new Function(`"use strict";${this.onOpen}`)();
+    if (this.onOpen) {
+      new Function(`"use strict";${this.onOpen}`)();
+    }
   }
 
   handleDialogHide(event) {
@@ -620,7 +649,9 @@ class EddieConnectButton extends LitElement {
     }
 
     this.dispatchEvent(dialogCloseEvent);
-    new Function(`"use strict";${this.onClose}`)();
+    if (this.onClose) {
+      new Function(`"use strict";${this.onClose}`)();
+    }
   }
 
   handleLogoSlotChange(event) {
@@ -632,7 +663,9 @@ class EddieConnectButton extends LitElement {
       const status = event.detail.status;
 
       // Execute the onStatusChange handler with the status as an argument
-      new Function(`"use strict";${this.onStatusChange}`)(status);
+      if (this.onStatusChange) {
+        new Function(`"use strict";${this.onStatusChange}`)(status);
+      }
 
       // Execute the specific status handler if it exists
       const statusHandlerString = status.toLowerCase().replaceAll("_", "");

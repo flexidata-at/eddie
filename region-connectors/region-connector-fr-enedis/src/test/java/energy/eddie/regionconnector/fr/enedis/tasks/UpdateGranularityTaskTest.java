@@ -26,6 +26,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.ResolvableType;
+import org.springframework.core.codec.DecodingException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
@@ -68,7 +69,7 @@ class UpdateGranularityTaskTest {
     }
 
     @Test
-    void update_withMaxGranularityReached_emitsUnfulfillable() {
+    void update_withMaxGranularityReached_retainsPermissionForRetry() {
         // Given
         var exception = WebClientResponseException.create(
                 HttpStatus.BAD_REQUEST,
@@ -85,14 +86,11 @@ class UpdateGranularityTaskTest {
         updateGranularityTask.update(pr, exception);
 
         // Then
-        verify(outbox).commit(assertArg(event -> assertAll(
-                () -> assertEquals("pid", event.permissionId()),
-                () -> assertEquals(PermissionProcessStatus.UNFULFILLABLE, event.status())
-        )));
+        verifyNoInteractions(outbox);
     }
 
     @Test
-    void update_withDataNeedsAllowedMaxGranularityReached_emitsUnfulfillable() {
+    void update_withDataNeedsAllowedMaxGranularityReached_retainsPermissionForRetry() {
         // Given
         var exception = WebClientResponseException.create(
                 HttpStatus.BAD_REQUEST,
@@ -116,10 +114,7 @@ class UpdateGranularityTaskTest {
         updateGranularityTask.update(pr, exception);
 
         // Then
-        verify(outbox).commit(assertArg(event -> assertAll(
-                () -> assertEquals("pid", event.permissionId()),
-                () -> assertEquals(PermissionProcessStatus.UNFULFILLABLE, event.status())
-        )));
+        verifyNoInteractions(outbox);
     }
 
     @Test
@@ -195,7 +190,11 @@ class UpdateGranularityTaskTest {
                 null
         );
         noBodyException.setBodyDecodeFunction(r -> null);
+        var malformedResponse = WebClientResponseException.create(
+                HttpStatus.BAD_GATEWAY.value(), "Bad Gateway", null, null, null);
+        malformedResponse.setBodyDecodeFunction(r -> { throw new DecodingException("Not JSON"); });
         return Stream.of(
+                Arguments.of(malformedResponse),
                 Arguments.of(new RuntimeException()),
                 Arguments.of(wrongErrorException),
                 Arguments.of(noBodyException)

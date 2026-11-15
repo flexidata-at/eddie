@@ -3,11 +3,9 @@
 
 package energy.eddie.regionconnector.fr.enedis.services;
 
-import energy.eddie.api.agnostic.Granularity;
-import energy.eddie.cim.agnostic.PermissionProcessStatus;
 import energy.eddie.regionconnector.fr.enedis.api.EnedisMeterReadingApi;
 import energy.eddie.regionconnector.fr.enedis.api.FrEnedisPermissionRequest;
-import energy.eddie.regionconnector.fr.enedis.permission.events.FrSimpleEvent;
+import energy.eddie.regionconnector.fr.enedis.dto.EnedisApiError;
 import energy.eddie.regionconnector.fr.enedis.providers.IdentifiableMeterReading;
 import energy.eddie.regionconnector.fr.enedis.providers.MeterReadingType;
 import energy.eddie.regionconnector.fr.enedis.tasks.UpdateGranularityTask;
@@ -25,9 +23,11 @@ import reactor.util.retry.RetryBackoffSpec;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
-import static energy.eddie.api.agnostic.Granularity.P1D;
-import static energy.eddie.api.agnostic.Granularity.PT30M;
 import static energy.eddie.regionconnector.fr.enedis.EnedisRegionConnectorMetadata.ZONE_ID_FR;
 
 @Service
@@ -37,7 +37,7 @@ public class PollingService implements CommonPollingService<FrEnedisPermissionRe
                                                                    .filter(PollingService::isRetryable);
     private final EnedisMeterReadingApi enedisApi;
     private final MeterReadingPermissionUpdateAndFulfillmentService meterReadingPermissionUpdateAndFulfillmentService;
-    private final Outbox outbox;
+    private final Map<String, Object> inFlight = new ConcurrentHashMap<>();
     private final UpdateGranularityTask updateGranularityTask;
     private final EnergyDataStreams streams;
 
@@ -50,7 +50,6 @@ public class PollingService implements CommonPollingService<FrEnedisPermissionRe
     ) {
         this.enedisApi = enedisApi;
         this.meterReadingPermissionUpdateAndFulfillmentService = meterReadingPermissionUpdateAndFulfillmentService;
-        this.outbox = outbox;
         this.updateGranularityTask = updateGranularityTask;
         this.streams = streams;
     }
@@ -88,118 +87,116 @@ public class PollingService implements CommonPollingService<FrEnedisPermissionRe
             LocalDate end
     ) {
         String permissionId = permissionRequest.permissionId();
-        LOGGER.info("Preparing to fetch data from ENEDIS for permission request '{}' from '{}' to '{}' (inclusive)",
-                    permissionId, permissionRequest.start(), end);
+        LOGGER.info("Preparing to fetch data from ENEDIS for permission request '{}' from '{}' to '{}' (exclusive)",
+                    permissionId, start, end);
 
-        // If the granularity is PT30M, we need to fetch the data in batches
-        switch (permissionRequest.granularity()) {
-            case PT30M -> fetchDataInBatches(permissionRequest, start, end)
-                    .doOnComplete(() -> LOGGER.info(
-                            "Finished fetching half hourly data from ENEDIS for permission request '{}'",
-                            permissionId))
-                    .subscribe(identifiableMeterReading -> handleIdentifiableMeterReading(
-                                       PT30M,
-                                       permissionRequest,
-                                       identifiableMeterReading
-                               ),
-                               error -> updateGranularityTask.update(permissionRequest, error)
-                    );
-            case P1D -> fetchData(permissionRequest, start, end)
-                    .subscribe(identifiableMeterReading -> handleIdentifiableMeterReading(
-                                       P1D,
-                                       permissionRequest,
-                                       identifiableMeterReading
-                               ),
-                               error -> updateGranularityTask.update(permissionRequest, error)
-                    );
-            default -> throw new IllegalStateException("Unsupported granularity: " + permissionRequest.granularity());
+        if (!start.isBefore(end)) {
+            return;
         }
+        AtomicBoolean incompleteFetch = new AtomicBoolean();
+        AtomicReference<Throwable> noData = new AtomicReference<>();
+        AtomicReference<IdentifiableMeterReading> latest = new AtomicReference<>();
+        Flux<IdentifiableMeterReading> readings = switch (permissionRequest.granularity()) {
+            case PT30M -> calculateBatchDates(start, end).concatMapDelayError(batchStart ->
+                    fetchAvailableData(permissionRequest, batchStart,
+                                       batchStart.plusWeeks(1).isAfter(end) ? end : batchStart.plusWeeks(1),
+                                       incompleteFetch, noData), true, 1);
+            case P1D -> fetchAvailableData(permissionRequest, start, end, incompleteFetch, noData);
+            default -> throw new IllegalStateException("Unsupported granularity: " + permissionRequest.granularity());
+        };
+        var pollingRun = new Object();
+        if (inFlight.putIfAbsent(permissionId, pollingRun) != null) {
+            return;
+        }
+        // Completion can synchronously start a new granularity poll. An older run must
+        // never release the lock belonging to that new subscription in doFinally.
+        readings.doOnComplete(() -> inFlight.remove(permissionId, pollingRun))
+                .doFinally(ignored -> inFlight.remove(permissionId, pollingRun))
+                .subscribe(reading -> {
+                    // Empty responses must not masquerade as delivered data or fulfillment.
+                    if (reading.payload().readings().stream().allMatch(value -> value.points().isEmpty())) {
+                        incompleteFetch.set(true);
+                        return;
+                    }
+                    latest.updateAndGet(previous -> previous == null
+                            || reading.meterReadingEndDate().isAfter(previous.meterReadingEndDate()) ? reading : previous);
+                    streams.publish(reading);
+                }, error -> LOGGER.warn("ENEDIS fetch incomplete for permission '{}'; preserving delivered readings and permission for retry",
+                                        permissionId, error), () -> {
+                    // Only decide fulfillment once ALL batches/directions have completed.
+                    // A missing interval is not a revoked consent; an access/technical error
+                    // must not be hidden by a successful later batch.
+                    if (incompleteFetch.get() || (latest.get() != null && noData.get() != null)) {
+                        LOGGER.warn("ENEDIS has unavailable intervals of permission '{}'; keeping available data and permission for retry", permissionId);
+                    } else if (latest.get() != null) {
+                        meterReadingPermissionUpdateAndFulfillmentService.tryUpdateAndFulfillPermissionRequest(
+                                permissionRequest, latest.get());
+                    } else if (noData.get() != null) {
+                        updateGranularityTask.update(permissionRequest, noData.get());
+                    }
+                });
     }
 
-    private void handleIdentifiableMeterReading(
-            Granularity granularity,
-            FrEnedisPermissionRequest permissionRequest,
-            IdentifiableMeterReading identifiableMeterReading
+    private Flux<IdentifiableMeterReading> fetchAvailableData(
+            FrEnedisPermissionRequest request, LocalDate start, LocalDate end,
+            AtomicBoolean incompleteFetch, AtomicReference<Throwable> noData
     ) {
-        LOGGER.atInfo()
-              .addArgument(granularity)
-              .addArgument(permissionRequest::permissionId)
-              .log("Fetched data with {} granularity from ENEDIS for permission request '{}'");
-
-        meterReadingPermissionUpdateAndFulfillmentService.tryUpdateAndFulfillPermissionRequest(
-                permissionRequest,
-                identifiableMeterReading
-        );
-        streams.publish(identifiableMeterReading);
-    }
-
-    private Flux<IdentifiableMeterReading> fetchData(
-            FrEnedisPermissionRequest permissionRequest,
-            LocalDate start,
-            LocalDate end
-    ) {
-        String permissionId = permissionRequest.permissionId();
-        LOGGER.info("Fetching data from ENEDIS for permissionId '{}' from '{}' to '{}'", permissionId, start, end);
-
-        Flux<IdentifiableMeterReading> consumptionFlux = Flux
-                .defer(() -> enedisApi.getConsumptionMeterReading(
-                        permissionRequest.usagePointId(),
-                        start,
-                        end,
-                        permissionRequest.granularity()
-                ))
-                .retryWhen(RETRY_BACKOFF_SPEC)
-                .doOnError(e -> handleError(permissionId, start, end, e))
-                .map(meterReading -> new IdentifiableMeterReading(
-                        permissionRequest,
-                        meterReading,
-                        MeterReadingType.CONSUMPTION
-                ));
-
-        Flux<IdentifiableMeterReading> productionFlux = Flux
-                .defer(() -> enedisApi.getProductionMeterReading(
-                        permissionRequest.usagePointId(),
-                        start,
-                        end,
-                        permissionRequest.granularity()
-                ))
-                .retryWhen(RETRY_BACKOFF_SPEC)
-                .doOnError(e -> handleError(permissionId, start, end, e))
-                .map(meterReading -> new IdentifiableMeterReading(
-                        permissionRequest,
-                        meterReading,
-                        MeterReadingType.PRODUCTION
-                ));
-
-        return switch (permissionRequest.usagePointType()) {
-            case CONSUMPTION -> consumptionFlux;
-            case PRODUCTION -> productionFlux;
-            case CONSUMPTION_AND_PRODUCTION -> Flux.merge(consumptionFlux, productionFlux);
+        // Handle consumption and production separately: one absent direction cannot cancel the other.
+        return switch (request.usagePointType()) {
+            case CONSUMPTION -> fetchAvailableDirection(request, start, end, MeterReadingType.CONSUMPTION, incompleteFetch, noData);
+            case PRODUCTION -> fetchAvailableDirection(request, start, end, MeterReadingType.PRODUCTION, incompleteFetch, noData);
+            case CONSUMPTION_AND_PRODUCTION -> Flux.concatDelayError(
+                    fetchAvailableDirection(request, start, end, MeterReadingType.CONSUMPTION, incompleteFetch, noData),
+                    fetchAvailableDirection(request, start, end, MeterReadingType.PRODUCTION, incompleteFetch, noData));
         };
     }
 
-    private void handleError(String permissionId, LocalDate start, LocalDate end, Throwable e) {
-        LOGGER.error("Error while fetching data from ENEDIS for permissionId '{}' from '{}' to '{}'",
-                     permissionId, start, end, e);
-        if (e instanceof WebClientResponseException.Forbidden) {
-            LOGGER.warn("Revoking permission request for permissionId '{}'", permissionId);
-            outbox.commit(new FrSimpleEvent(permissionId, PermissionProcessStatus.REVOKED));
-        }
+    private Flux<IdentifiableMeterReading> fetchAvailableDirection(
+            FrEnedisPermissionRequest request, LocalDate start, LocalDate end, MeterReadingType type,
+            AtomicBoolean incompleteFetch, AtomicReference<Throwable> noData
+    ) {
+        return Flux.defer(() -> type == MeterReadingType.CONSUMPTION
+                        ? enedisApi.getConsumptionMeterReading(request.usagePointId(), start, end, request.granularity())
+                        : enedisApi.getProductionMeterReading(request.usagePointId(), start, end, request.granularity()))
+                .retryWhen(RETRY_BACKOFF_SPEC)
+                .map(reading -> new IdentifiableMeterReading(request, reading, type))
+                .onErrorResume(error -> {
+                    String code = providerErrorCode(error);
+                    boolean missing = "no_data_found".equals(code);
+                    boolean deniedInterval = "ADAM-DC-0008".equals(code);
+                    if (!missing && !deniedInterval) {
+                        return Flux.error(error);
+                    }
+                    // Enedis may reject a whole batch even when individual days are available.
+                    // Narrow dates only; retain the same metering point, consent and resolution.
+                    long days = ChronoUnit.DAYS.between(start, end);
+                    if (days > 1) {
+                        return Flux.range(0, Math.toIntExact(days)).concatMapDelayError(day ->
+                                fetchAvailableDirection(request, start.plusDays(day), start.plusDays(day + 1L),
+                                                        type, incompleteFetch, noData), true, 1);
+                    }
+                    if (missing) {
+                        noData.compareAndSet(null, error);
+                    } else {
+                        incompleteFetch.set(true);
+                    }
+                    LOGGER.info("ENEDIS interval unavailable for permission '{}' from '{}' to '{}' ({}); continuing",
+                                request.permissionId(), start, end, code);
+                    return Flux.empty();
+                });
     }
 
-    private Flux<IdentifiableMeterReading> fetchDataInBatches(
-            FrEnedisPermissionRequest permissionRequest,
-            LocalDate start,
-            LocalDate end
-    ) {
-        return calculateBatchDates(start, end)
-                .flatMap(batchStart -> {
-                    // Calculate the end date for this batch, ensuring it's within the overall end date and not in the future
-                    LocalDate batchEnd = batchStart.plusWeeks(1);
-                    batchEnd = batchEnd.isAfter(end) ? end : batchEnd; // Ensure not to exceed the end date
-                    return fetchData(permissionRequest, batchStart, batchEnd);
-                })
-                .onErrorComplete(); // stop the stream if an error occurs
+    @org.jspecify.annotations.Nullable
+    private static String providerErrorCode(Throwable error) {
+        if (error instanceof WebClientResponseException response) {
+            try {
+                var body = response.getResponseBodyAs(EnedisApiError.class);
+                return body == null ? null : body.error();
+            } catch (RuntimeException ignored) {
+                // Technical/gateway errors do not establish a customer revocation.
+            }
+        }
+        return null;
     }
 
     private Flux<LocalDate> calculateBatchDates(LocalDate start, LocalDate end) {

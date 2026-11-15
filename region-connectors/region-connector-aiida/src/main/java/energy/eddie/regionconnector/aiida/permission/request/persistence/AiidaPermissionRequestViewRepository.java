@@ -5,6 +5,7 @@ package energy.eddie.regionconnector.aiida.permission.request.persistence;
 
 import energy.eddie.api.agnostic.process.model.persistence.PermissionRequestRepository;
 import energy.eddie.api.agnostic.process.model.persistence.StalePermissionRequestRepository;
+import energy.eddie.cim.agnostic.PermissionProcessStatus;
 import energy.eddie.regionconnector.aiida.permission.request.AiidaPermissionRequest;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.jpa.repository.Query;
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Repository for selecting the aggregate permission request by using the SQL view.
@@ -35,6 +37,8 @@ public interface AiidaPermissionRequestViewRepository extends
     }
 
     Optional<AiidaPermissionRequest> findById(String permissionId);
+
+    List<AiidaPermissionRequest> findByStatusIn(Set<PermissionProcessStatus> statuses);
 
     @Override
     default AiidaPermissionRequest getByPermissionId(String permissionId) {

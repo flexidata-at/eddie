@@ -22,6 +22,8 @@ class PermissionRequestForm extends PermissionRequestFormBase {
     _isSentToPermissionAdministrator: { type: Boolean },
     _isSubmitDisabled: { type: Boolean },
     _isVerifying: { type: Boolean },
+    _requestCreated: { type: Boolean },
+    _errorMessage: { state: true },
   };
 
   permissionId = null;
@@ -43,59 +45,68 @@ class PermissionRequestForm extends PermissionRequestFormBase {
 
   handleSubmit(event) {
     event.preventDefault();
+    if (this._isSubmitDisabled || this._requestCreated) return;
+    this._errorMessage = "";
 
     const formData = new FormData(event.target);
     let payload = {
       connectionId: this.connectionId,
-      meteringPointId: formData.get("meteringPointId"),
-      nif: formData.get("nif"),
+      meteringPointId: this.accountingPointId || formData.get("meteringPointId"),
+      nif: this.customerIdentification || formData.get("nif"),
       dataNeedIds: this.dataNeedId.split(","),
     };
 
     this._isSubmitDisabled = true;
 
-    this.createPermissionRequest(payload)
+    return this.createPermissionRequest(payload)
       .then(({ permissionIds }) => {
+        if (!Array.isArray(permissionIds) || !permissionIds.length) {
+          throw new Error("The server did not return a permission request. Please try again.");
+        }
         this.permissionId = permissionIds.join(",");
+        // A missed or delayed status-stream event must not leave the submitted form stuck.
+        // Creation is not consent: EDDIE still verifies the response with Datadis.
+        this._requestCreated = true;
       })
       .catch((error) => {
         this._isSubmitDisabled = false;
-        this.error(error);
+        this.showError(error);
       });
   }
 
-  accepted() {
-    fetch(`${this.requestUrl}/accepted?permission-id=${this.permissionId}`, {
-      method: "PATCH",
-      headers: {
-        Authorization: "Bearer " + this.bearerToken,
-      },
-    })
-      .then(() => {
-        this._isVerifying = true;
-      })
-      .catch((error) => {
-        this._isVerifying = false;
-        this.error(error);
-      });
+  showError(error) {
+    this._errorMessage = error instanceof Error ? error.message : String(error);
+    this.error(this._errorMessage);
   }
 
-  rejected() {
-    fetch(`${this.requestUrl}/rejected?permission-id=${this.permissionId}`, {
-      method: "PATCH",
-      headers: {
-        Authorization: "Bearer " + this.bearerToken,
-      },
-    }).catch((error) => {
-      this.error(error);
-    });
+  accepted() { return this.submitDecision("accepted"); }
+
+  rejected() { return this.submitDecision("rejected"); }
+
+  async submitDecision(decision) {
+    if (!this.permissionId || this._isVerifying) return;
+    this._errorMessage = "";
+    this._isVerifying = true;
+    try {
+      const response = await fetch(`${this.requestUrl}/${decision}?permission-id=${encodeURIComponent(this.permissionId)}`, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer " + this.bearerToken },
+      });
+      if (!response.ok) {
+        throw new Error(`Your response could not be saved (${response.status}). Please try again.`);
+      }
+    } catch (error) {
+      this._isVerifying = false;
+      this.showError(error);
+    }
   }
 
   render() {
     return html`
+      ${this._errorMessage ? html`<sl-alert open variant="danger" role="alert">${this._errorMessage}</sl-alert>` : nothing}
       <form
         id="request-form"
-        ?hidden="${this._isSentToPermissionAdministrator}"
+        ?hidden="${this._requestCreated || this._isSentToPermissionAdministrator}"
       >
         <sl-input
           label="CUPS"
@@ -134,14 +145,17 @@ class PermissionRequestForm extends PermissionRequestFormBase {
           type="submit"
           variant="primary"
         >
-          Connect
+          ${this._isSubmitDisabled ? "Connecting…" : "Connect"}
         </sl-button>
       </form>
 
-      <div ?hidden="${!this._isSentToPermissionAdministrator}">
+      <div ?hidden="${!this._requestCreated && !this._isSentToPermissionAdministrator}">
         <p>
-          A request for permission has been sent to Datadis. Please accept the
-          authorization request in your Datadis portal.
+          ${this._isSentToPermissionAdministrator
+            ? "Your request has been sent to Datadis."
+            : "Your permission request has been created."}
+          Open Datadis and approve the authorization request when it appears.
+          If it is not visible yet, allow a few minutes and refresh the Datadis portal.
         </p>
         <a
           href="${this.jumpOffUrl}"
@@ -158,14 +172,14 @@ class PermissionRequestForm extends PermissionRequestFormBase {
           <sl-button
             variant="success"
             @click="${this.accepted}"
-            ?disabled="${this._isVerifying}"
+            ?disabled="${this._isVerifying || !this.permissionId}"
           >
             Accepted
           </sl-button>
           <sl-button
             variant="danger"
             @click="${this.rejected}"
-            ?disabled="${this._isVerifying}"
+            ?disabled="${this._isVerifying || !this.permissionId}"
           >
             Rejected
           </sl-button>

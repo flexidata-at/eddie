@@ -8,9 +8,13 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.boot.context.properties.bind.Name;
 import org.springframework.validation.annotation.Validated;
+
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * The main configuration for the EDA region connector.
@@ -28,12 +32,44 @@ public record AtConfiguration(
         @NotNull
         @Pattern(regexp = CONVERSATION_ID_PREFIX_PATTERN,
                 message = "must contain only ASCII letters and digits")
-        @DefaultValue("") String conversationIdPrefix
+        @DefaultValue("") String conversationIdPrefix,
+        @Nullable Set<String> allowedEnergyCommunityIds
 ) {
     public static final String CONVERSATION_ID_PREFIX_PATTERN = "[0-9A-Za-z]*";
 
+    @ConstructorBinding
+    public AtConfiguration {
+    }
+
+    public AtConfiguration(
+            String eligiblePartyId,
+            @Nullable String energyCommunityId,
+            String conversationIdPrefix
+    ) {
+        this(eligiblePartyId, energyCommunityId, conversationIdPrefix, null);
+    }
+
     public boolean supportsEnergyCommunity() {
-        return energyCommunityId != null;
+        return hasEnergyCommunityIds();
+    }
+
+    public Optional<String> resolveEnergyCommunityId(Optional<String> requestedCommunityId) {
+        if (!supportsEnergyCommunity()) {
+            return Optional.empty();
+        }
+        return requestedCommunityId
+                .or(() -> Optional.ofNullable(energyCommunityId))
+                .filter(id -> !id.isBlank() && (id.equals(energyCommunityId)
+                        || (allowedEnergyCommunityIds != null && allowedEnergyCommunityIds.contains(id))));
+    }
+
+    public boolean isEnergyCommunityMarketParty(@Nullable String partyId) {
+        return supportsEnergyCommunity() && partyId != null && !partyId.isBlank() && partyId.equals(eligiblePartyId);
+    }
+
+    private boolean hasEnergyCommunityIds() {
+        return (energyCommunityId != null && !energyCommunityId.isBlank())
+                || (allowedEnergyCommunityIds != null && !allowedEnergyCommunityIds.isEmpty());
     }
 
     public enum PartyIdType {

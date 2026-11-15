@@ -217,12 +217,12 @@ public class DataNeedCalculationServiceImpl implements DataNeedCalculationServic
         if (repeatedUniqueDataNeedType.isPresent()) {
             return repeatedUniqueDataNeedType.get();
         }
-        var vhdDns = repeatedEnergyTypes(dns);
-        if (vhdDns.isPresent()) {
-            return vhdDns.get();
-        }
         for (var dataNeed : dns) {
             results.put(dataNeed.id(), calculate(dataNeed, referenceDateTime));
+        }
+        var overlappingVhdDns = overlappingEnergyTimeframes(results.values());
+        if (overlappingVhdDns.isPresent()) {
+            return overlappingVhdDns.get();
         }
         return new CalculationResult(results);
     }
@@ -265,21 +265,30 @@ public class DataNeedCalculationServiceImpl implements DataNeedCalculationServic
         return Optional.empty();
     }
 
-    private static Optional<InvalidDataNeedCombination> repeatedEnergyTypes(List<DataNeed> dns) {
-        var vhdDns = dns.stream()
-                        .filter(ValidatedHistoricalDataDataNeed.class::isInstance)
-                        .map(ValidatedHistoricalDataDataNeed.class::cast)
-                        .toList();
-        var repeatedVhdDns = vhdDns.stream()
-                                   .map(ValidatedHistoricalDataDataNeed::energyType)
-                                   .distinct()
-                                   .count();
-        if (repeatedVhdDns != vhdDns.size()) {
-            return Optional.of(
-                    new InvalidDataNeedCombination(
-                            vhdDns.stream().map(DataNeed::id).collect(Collectors.toSet()),
-                            "Only one energy type allowed for validated historical data need at a time"
-                    ));
+    private static Optional<InvalidDataNeedCombination> overlappingEnergyTimeframes(
+            Collection<DataNeedCalculationResult> results
+    ) {
+        var byEnergyType = results.stream()
+                                  .filter(ValidatedHistoricalDataDataNeedResult.class::isInstance)
+                                  .map(ValidatedHistoricalDataDataNeedResult.class::cast)
+                                  .collect(Collectors.groupingBy(result -> result.dataNeed().energyType()));
+        for (var energyTypeResults : byEnergyType.values()) {
+            var sorted = energyTypeResults.stream()
+                                          .sorted(Comparator.comparing(result -> result.energyTimeframe().start()))
+                                          .toList();
+            for (int i = 1; i < sorted.size(); i++) {
+                var previous = sorted.get(i - 1);
+                var current = sorted.get(i);
+                if (!current.energyTimeframe().start().isAfter(previous.energyTimeframe().end())) {
+                    return Optional.of(
+                            new InvalidDataNeedCombination(
+                                    energyTypeResults.stream()
+                                                     .map(result -> result.dataNeed().id())
+                                                     .collect(Collectors.toSet()),
+                                    "Validated historical data needs for the same energy type must not overlap"
+                            ));
+                }
+            }
         }
         return Optional.empty();
     }

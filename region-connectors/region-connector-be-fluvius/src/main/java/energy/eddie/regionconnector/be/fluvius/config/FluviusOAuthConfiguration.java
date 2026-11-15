@@ -19,6 +19,7 @@ public class FluviusOAuthConfiguration {
     private final String scope;
     private final AuthenticationMethod authenticationMethod;
     private final String sslBundle;
+    private final AssertionAlgorithm assertionAlgorithm;
 
     public FluviusOAuthConfiguration(
             String tokenUrl,
@@ -30,7 +31,6 @@ public class FluviusOAuthConfiguration {
         this(tokenUrl, clientId, clientSecret, tenantId, scope, AuthenticationMethod.CLIENT_SECRET, "fluvius");
     }
 
-    @ConstructorBinding
     public FluviusOAuthConfiguration(
             String tokenUrl,
             String clientId,
@@ -39,6 +39,20 @@ public class FluviusOAuthConfiguration {
             String scope,
             @DefaultValue("client-secret") AuthenticationMethod authenticationMethod,
             @DefaultValue("fluvius") String sslBundle
+    ) {
+        this(tokenUrl, clientId, clientSecret, tenantId, scope, authenticationMethod, sslBundle, AssertionAlgorithm.PS256);
+    }
+
+    @ConstructorBinding
+    public FluviusOAuthConfiguration(
+            String tokenUrl,
+            String clientId,
+            @Nullable String clientSecret,
+            String tenantId,
+            String scope,
+            @DefaultValue("client-secret") AuthenticationMethod authenticationMethod,
+            @DefaultValue("fluvius") String sslBundle,
+            @DefaultValue("PS256") AssertionAlgorithm assertionAlgorithm
     ) {
         Assert.hasText(tokenUrl, "Fluvius OAuth token-url is required");
         Assert.hasText(clientId, "Fluvius OAuth client-id is required");
@@ -54,6 +68,7 @@ public class FluviusOAuthConfiguration {
         this.scope = scope;
         this.authenticationMethod = authenticationMethod;
         this.sslBundle = sslBundle;
+        this.assertionAlgorithm = assertionAlgorithm;
     }
 
     public String tokenUrl() {
@@ -83,6 +98,15 @@ public class FluviusOAuthConfiguration {
 
     public String sslBundle() {
         return sslBundle;
+    }
+
+    public AssertionAlgorithm assertionAlgorithm() {
+        return assertionAlgorithm;
+    }
+
+    public enum AssertionAlgorithm {
+        PS256,
+        RS256
     }
 
     public enum AuthenticationMethod {

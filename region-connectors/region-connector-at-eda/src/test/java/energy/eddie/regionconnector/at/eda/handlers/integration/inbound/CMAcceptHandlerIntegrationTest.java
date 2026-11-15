@@ -4,6 +4,9 @@
 package energy.eddie.regionconnector.at.eda.handlers.integration.inbound;
 
 import energy.eddie.cim.agnostic.PermissionProcessStatus;
+import energy.eddie.dataneeds.needs.ValidatedHistoricalDataDataNeed;
+import energy.eddie.dataneeds.services.DataNeedsService;
+import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
 import energy.eddie.regionconnector.at.eda.dto.SimpleEdaConsumptionRecord;
 import energy.eddie.regionconnector.at.eda.models.CMRequestStatus;
 import energy.eddie.regionconnector.at.eda.models.ConsentData;
@@ -48,6 +51,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -198,8 +203,11 @@ class CMAcceptHandlerIntegrationTest {
         handler.handleCMAccept(message(1, 2, 3));
         var consumptionRecord = new SimpleEdaConsumptionRecord().setConversationId("new-retransmission-conversation")
                 .setMeteringPoint("point-2").setStartDate(START.plusDays(2)).setEndDate(START.plusDays(3));
+        var dataNeeds = mock(DataNeedsService.class);
+        when(dataNeeds.findById("data-need")).thenReturn(Optional.of(new ValidatedHistoricalDataDataNeed()));
 
-        var result = new IdentifiableConsumptionRecordService(requestRepository).mapToIdentifiableConsumptionRecord(consumptionRecord);
+        var result = new IdentifiableConsumptionRecordService(requestRepository, dataNeeds,
+                new AtConfiguration("EP123456", null, "")).mapToIdentifiableConsumptionRecord(consumptionRecord);
 
         assertThat(result).isPresent();
         assertThat(result.orElseThrow().permissionRequests()).singleElement().satisfies(request -> {

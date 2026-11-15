@@ -5,6 +5,7 @@ package energy.eddie.regionconnector.aiida.services;
 
 import energy.eddie.regionconnector.aiida.mqtt.events.MqttConnectedEvent;
 import energy.eddie.regionconnector.aiida.publisher.MqttEventPublisher;
+import org.eclipse.paho.mqttv5.client.MqttAsyncClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -16,6 +17,7 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(SpringExtension.class)
 @SpringBootTest(classes = {MqttEventListener.class, MqttEventPublisher.class})
@@ -24,6 +26,8 @@ class MqttEventListenerTest {
     private MqttEventPublisher mqttEventPublisher;
     @MockitoBean
     private AiidaPermissionService aiidaPermissionService;
+    @MockitoBean
+    private MqttAsyncClient mqttClient;
     @SuppressWarnings("unused")
     @MockitoSpyBean
     @InjectMocks
@@ -33,6 +37,7 @@ class MqttEventListenerTest {
     void onMqttConnectedEvent_subscribeToAllActivePermissionTopics() {
         // Given
         var event = mock(MqttConnectedEvent.class);
+        when(mqttClient.isConnected()).thenReturn(true);
 
         // When
         mqttEventPublisher.publishEvent(event);

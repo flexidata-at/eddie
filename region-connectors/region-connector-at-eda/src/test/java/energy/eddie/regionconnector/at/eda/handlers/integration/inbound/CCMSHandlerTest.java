@@ -3,8 +3,11 @@
 
 package energy.eddie.regionconnector.at.eda.handlers.integration.inbound;
 
+import energy.eddie.api.agnostic.Granularity;
 import energy.eddie.api.agnostic.data.needs.EnergyDirection;
 import energy.eddie.cim.agnostic.PermissionProcessStatus;
+import energy.eddie.dataneeds.needs.CESUJoinRequestDataNeed;
+import energy.eddie.dataneeds.services.DataNeedsService;
 import energy.eddie.regionconnector.at.api.AtPermissionRequestProjection;
 import energy.eddie.regionconnector.at.api.AtPermissionRequestRepository;
 import energy.eddie.regionconnector.at.eda.dto.SimpleResponseData;
@@ -30,6 +33,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -48,6 +52,8 @@ class CCMSHandlerTest {
     @Mock
     private Outbox outbox;
 
+    @Mock
+    private DataNeedsService dataNeedsService;
     @InjectMocks
     private CCMSHandler handler;
 
@@ -147,6 +153,22 @@ class CCMSHandlerTest {
                 () -> assertEquals(PermissionProcessStatus.EXTERNALLY_TERMINATED,
                                    edaAnswerEventCaptor.getAllValues().getLast().status())
         );
+    }
+
+    @Test
+    void reportsMarketRefusalAsFailedTerminationForMatchingCommunityPermission() {
+        var response = new CMRequestStatus(NotificationMessageType.CCMS_REJECT, "conversationId", null,
+                List.of(new ConsentData(List.of(ResponseCode.KnownResponseCodes.INVALID_PROCESSDATE.getCode()),
+                        "Invalid process date", Optional.of("consentId"), Optional.of("meteringPointId"))));
+        when(repository.findByConversationIdOrCMRequestId("conversationId", null))
+                .thenReturn(List.of(projection(PermissionProcessStatus.REQUIRES_EXTERNAL_TERMINATION)));
+        when(dataNeedsService.findById("dnid")).thenReturn(Optional.of(new CESUJoinRequestDataNeed(100,
+                Granularity.PT15M, Granularity.PT15M, EnergyDirection.CONSUMPTION, "community")));
+
+        handler.handleCCMSReject(response);
+
+        verify(outbox).commit(edaAnswerEventCaptor.capture());
+        assertEquals(PermissionProcessStatus.FAILED_TO_TERMINATE, edaAnswerEventCaptor.getValue().status());
     }
 
 

@@ -25,7 +25,8 @@ depends on the way you deploy the region connector.
 | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `region-connector.at.eda.eligibleparty.id `                                   | The company identification number you get from registering as a service provider with ebUtillitis. This can either be the normal Eligible Party ID or for energy communities the energy community partner ID.                                                                                                                                                                                                                                                                       |
 | `region-connector.at.eda.conversation-id.prefix`                              | Optional prefix for generated EDA grouping IDs used as both message and conversation IDs, for example to route multiple EDDIE adapters using the same eligible party. The prefix may contain only `0-9`, `A-Z`, and `a-z`. The connector fails to start if the prefix contains other characters or if a complete generated ID would exceed the EDA limit of 35 characters.                                                                                                          |
-| `region-connector.at.eda.energy-community-id`                                 | The ID of the energy community in this format `ATCC0000DYNAMXX000000000000000000`. This property is optional, if omitted the EDDIE instance will not support energy community specific processes, such as the [CESUJoinRegquest](../../2-integrating/data-needs.md#CESUJoinRequestDataNeed).                                                                                                                                                                                        |
+| `region-connector.at.eda.energy-community-id` | Optional default market community ID for data needs without an explicit `energyCommunityId`. The default community and entries in `allowed-energy-community-ids` enable community processes. |
+| `region-connector.at.eda.allowed-energy-community-ids` | Optional comma-separated set of market community IDs authorized for CESU data needs. An explicit data-need community must match this allowlist or the configured default community. |
 | `region-connector.at.eda.retry`                                               | The retry configuration, when a failed request should be retried uses spring cron syntax.                                                                                                                                                                                                                                                                                                                                                                                           |
 | `region-connector.at.eda.ponton.messenger.adapter.id`                         | The Id the region connector uses to connect with the PontonXP Messenger. This should match the default value configured in the messenger.                                                                                                                                                                                                                                                                                                                                           |
 | `region-connector.at.eda.ponton.messenger.adapter.version`                    | Version number of the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -201,6 +202,45 @@ Content-Type: application/json
   "creationDateTime": "2025-08-28T00:00:00Z"
 }
 ```
+
+## Energy community integration
+
+Configure `region-connector.at.eda.eligibleparty.id` with the registered EDA market-party identifier authorized to represent the communities. The connector uses this single identity for all outbound messages and validates incoming community messages against it. Set `region-connector.at.eda.allowed-energy-community-ids` to the comma-separated set of market community IDs that this identity is authorized to represent. Configure a separate connector deployment and Ponton routing for each additional market-party identity. `region-connector.at.eda.energy-community-id` remains the default for existing data needs that lack an explicit community ID.
+
+Create a `cesu-join-request` data need with `energyCommunityId` and `regionConnectorFilter: {"type":"allowlist","regionConnectorIds":["at-eda"]}`. Use this data need in the EDDIE Button. When the permission is created, EDDIE checks the requested community against the market-party configuration. The market start date is the next calendar day in Austria. The Austrian grid operator verifies accounting-point eligibility in the network area and handles customer approval.
+
+The following endpoints use the trusted EDDIE management listener, port 9090 by default. Keep this listener private and authenticate callers at the ingress. The prefix `management` can be configured via `eddie.management.server.urlprefix`.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /region-connectors/at-eda/management/cesu-capabilities?energyCommunityId=…` | Confirm the market-party binding and supported join/termination operations for a configured community. |
+| `POST /region-connectors/at-eda/management/cesu-join-request` | Send a manual join for one accounting point through the normal EDDIE permission workflow. HTTP 201 returns the created `permissionIds`. |
+| `GET /region-connectors/at-eda/management/cesu-permissions/{permissionId}?connectionId=…&dataNeedId=…&energyCommunityId=…` | Read status, start, end and any market message for the matching permission. |
+| `POST /region-connectors/at-eda/management/cesu-permissions/{permissionId}/termination` | Request market termination. Supply `connectionId`, `dataNeedId` and `energyCommunityId` in JSON. HTTP 202 acknowledges the request. The permission subsequently reports `EXTERNALLY_TERMINATED`, `REVOKED` or `FAILED_TO_TERMINATE` based on the market response. |
+
+Manual join payload using the EDDIE CIM 1.12 `EnergyCommunity` and `AccountingPoint` types. Replace the illustrative identifiers with the configured community, data need and customer accounting point:
+
+```json
+{
+  "connectionId": "join-correlation-id",
+  "dataNeedId": "prepared-cesu-need-id",
+  "permissionAdministratorId": "AT002000",
+  "energyCommunity": {
+    "mRID": "configured-market-community-id",
+    "AccountingPoint": [
+      {
+        "mRID": { "value": "AT0020000000000000000000021247179", "codingScheme": "NAT" },
+        "energySharingParticipationFactor": 25,
+        "energySharingEnergyDirection": "A02"
+      }
+    ]
+  }
+}
+```
+
+`A02` is consumption and `A01` is production. The participation factor is a whole percentage from 1 to 100. A manual join creates a permission attempt. The caller tracks the connection and permission IDs and reconciles ambiguous delivery before resubmitting.
+
+The connector publishes membership reference data as CIM 1.12 Energy Sharing Reference Data and allocation readings from Austrian `CR_MSG` as raw EDA XML and CIM 1.04 Validated Historical Data. It checks the community ID, DSO, market-party recipient, accounting point and accepted permission before publishing the readings. The existing VHD representation preserves native OBIS series codes, quantities, units and quality. Interpret series codes using the Austrian documentation. Use `dataNeedId`, `connectionId` and `requestPermissionId` to correlate output. An integration that consumes these streams must keep raw and VHD subscriptions private and route data into the appropriate domain. A separate settlement stream and market-independent allocation series types require their own contract.
 
 ## Configuring PontonXP Messenger with multiple eligible parties and adapters
 

@@ -3,6 +3,10 @@
 
 package energy.eddie.core.services;
 
+import energy.eddie.cim.agnostic.ConnectionStatusMessage;
+import energy.eddie.cim.agnostic.PermissionProcessStatus;
+import energy.eddie.cim.v0_82.pmd.PermissionEnvelope;
+import energy.eddie.cim.v1_12.rpmd.RequestPermissionEnvelope;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -15,8 +19,11 @@ import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 import reactor.test.publisher.TestPublisher;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -27,6 +34,50 @@ class MessageStreamHubTest {
     private ArgumentCaptor<Flux<Integer>> fluxCaptor;
     @Mock
     private Consumer<Flux<?>> consumer;
+
+    @Test
+    void permissionDocumentIsReplayedToLateReceiver() {
+        assertLifecycleReplay(PermissionEnvelope.class, new PermissionEnvelope());
+    }
+
+    @Test
+    void requestPermissionDocumentIsReplayedToLateReceiver() {
+        assertLifecycleReplay(RequestPermissionEnvelope.class, new RequestPermissionEnvelope());
+    }
+
+    @Test
+    void connectionStatusIsReplayedToLateReceiver() {
+        assertLifecycleReplay(ConnectionStatusMessage.class,
+                new ConnectionStatusMessage("connection", "permission", "need", null, PermissionProcessStatus.ACCEPTED));
+    }
+
+    @Test
+    void ordinaryDataIsNotReplayedToLateReceiver() {
+        var first = new ArrayList<Object>();
+        var late = new ArrayList<Object>();
+        TestPublisher<Integer> publisher = TestPublisher.create();
+        messageStreamHub.registerProvider(Integer.class, publisher::flux);
+        messageStreamHub.registerReceiver(Integer.class, flux -> flux.subscribe(first::add));
+        publisher.next(1);
+        messageStreamHub.registerReceiver(Integer.class, flux -> flux.subscribe(late::add));
+        publisher.next(2);
+
+        assertEquals(List.of(1, 2), first);
+        assertEquals(List.of(2), late);
+    }
+
+    private <T> void assertLifecycleReplay(Class<T> type, T message) {
+        var first = new ArrayList<Object>();
+        var late = new ArrayList<Object>();
+        TestPublisher<T> publisher = TestPublisher.create();
+        messageStreamHub.registerProvider(type, publisher::flux);
+        messageStreamHub.registerReceiver(type, flux -> flux.subscribe(first::add));
+        publisher.next(message);
+        messageStreamHub.registerReceiver(type, flux -> flux.subscribe(late::add));
+
+        assertEquals(List.of(message), first);
+        assertEquals(List.of(message), late);
+    }
 
     @Test
     void testRegisterReceiverBeforeProvider() {

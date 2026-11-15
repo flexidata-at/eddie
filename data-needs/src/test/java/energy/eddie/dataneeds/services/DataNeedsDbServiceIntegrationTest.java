@@ -4,8 +4,10 @@
 package energy.eddie.dataneeds.services;
 
 import energy.eddie.dataneeds.needs.AccountingPointDataNeed;
+import energy.eddie.dataneeds.needs.CESUJoinRequestDataNeed;
 import energy.eddie.dataneeds.needs.DataNeed;
 import energy.eddie.dataneeds.persistence.DataNeedsRepository;
+import jakarta.persistence.EntityManager;
 import org.hibernate.proxy.HibernateProxy;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +17,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -32,6 +35,8 @@ class DataNeedsDbServiceIntegrationTest {
     private static final PostgreSQLContainer postgresqlContainer = new PostgreSQLContainer("postgres:15-alpine");
     @Autowired
     private DataNeedsRepository repository;
+    @Autowired
+    private EntityManager entityManager;
 
     public static DataNeed createDataNeed() {
         return new AccountingPointDataNeed("ac", "desc", "purpose", "https://localhost", true, null);
@@ -99,5 +104,24 @@ class DataNeedsDbServiceIntegrationTest {
 
         // Then
         assertThat(res).singleElement().isNotInstanceOf(HibernateProxy.class);
+    }
+
+    @Test
+    void storesAndReloadsTheMarketCommunityBindingOfACesuNeed() {
+        var need = JsonMapper.builder().build().readValue("""
+                {"type":"cesu-join-request","name":"Community join","description":"Join one community",
+                 "purpose":"Community membership","policyLink":"https://localhost","energyCommunityId":"community-a",
+                 "minGranularity":"PT15M","maxGranularity":"PT15M",
+                 "regionConnectorFilter":{"type":"allowlist","regionConnectorIds":["at-eda"]}}
+                """, DataNeed.class);
+        var service = new DataNeedsDbService(repository);
+        var id = service.saveNewDataNeed(need).id();
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(service.getById(id)).isInstanceOfSatisfying(CESUJoinRequestDataNeed.class, saved -> {
+            assertThat(saved.energyCommunityId()).contains("community-a");
+            assertThat(saved.regionConnectorFilter().orElseThrow().regionConnectorIds()).containsExactly("at-eda");
+        });
     }
 }

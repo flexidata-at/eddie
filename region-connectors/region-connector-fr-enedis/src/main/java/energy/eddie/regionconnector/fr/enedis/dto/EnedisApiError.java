@@ -3,7 +3,8 @@
 
 package energy.eddie.regionconnector.fr.enedis.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-public record EnedisApiError(@JsonProperty String error, @JsonProperty("error_message") String errorMessage) {
+public record EnedisApiError(@JsonProperty String error, @JsonProperty("error_message") @JsonAlias("error_description") String errorMessage) {
 }

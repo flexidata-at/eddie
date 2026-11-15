@@ -22,6 +22,11 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.test.StepVerifier;
 import reactor.test.publisher.TestPublisher;
 
+import java.util.List;
+import java.util.stream.IntStream;
+
+import static java.util.Objects.requireNonNull;
+
 @WebFluxTest(
         value = ConnectionStatusMessageController.class,
         excludeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = JwtIssuerFilter.class)
@@ -63,6 +68,43 @@ class ConnectionStatusMessageControllerTest {
                     .expectNextMatches(message -> message3.status().equals(message.status()))
                     .thenCancel()
                     .verify();
+    }
+
+    @Test
+    void connectionStatusMessageByPermissionIds_replaysLatestStatusAfterEventBufferRolledOver() {
+        var isolatedController = new ConnectionStatusMessageController();
+        TestPublisher<ConnectionStatusMessage> publisher = TestPublisher.create();
+        isolatedController.subscribe(publisher.flux());
+        publisher.next(statusMessage("durable", PermissionProcessStatus.ACCEPTED));
+        IntStream.range(0, 110)
+                .mapToObj(index -> statusMessage("other-" + index, PermissionProcessStatus.CREATED))
+                .forEach(publisher::next);
+
+        StepVerifier.create(requireNonNull(isolatedController.connectionStatusMessageByPermissionId(List.of("durable")).getBody()))
+                .expectNextMatches(message -> message.permissionId().equals("durable")
+                        && message.status() == PermissionProcessStatus.ACCEPTED)
+                .thenCancel()
+                .verify();
+    }
+
+    @Test
+    void lateSubscriberGetsLatestStateThenLiveUpdatesWithoutOlderBufferedStates() {
+        var isolatedController = new ConnectionStatusMessageController();
+        TestPublisher<ConnectionStatusMessage> publisher = TestPublisher.create();
+        isolatedController.subscribe(publisher.flux());
+        var accepted = statusMessage("permission", PermissionProcessStatus.ACCEPTED);
+        var duplicateAccepted = new ConnectionStatusMessage(accepted.connectionId(), accepted.permissionId(),
+                accepted.dataNeedId(), accepted.dataSourceInformation(), accepted.timestamp(), accepted.status(),
+                accepted.message(), accepted.additionalInformation());
+        publisher.next(statusMessage("permission", PermissionProcessStatus.CREATED),
+                accepted);
+
+        StepVerifier.create(requireNonNull(isolatedController.connectionStatusMessageByPermissionId(List.of("permission")).getBody()))
+                .expectNextMatches(message -> message.status() == PermissionProcessStatus.ACCEPTED)
+                .then(() -> publisher.next(duplicateAccepted, statusMessage("permission", PermissionProcessStatus.REVOKED)))
+                .expectNextMatches(message -> message.status() == PermissionProcessStatus.REVOKED)
+                .thenCancel()
+                .verify();
     }
 
     private ConnectionStatusMessage statusMessage(String pid, PermissionProcessStatus status) {
