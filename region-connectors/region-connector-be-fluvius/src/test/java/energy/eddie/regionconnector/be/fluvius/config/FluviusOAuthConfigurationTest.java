@@ -27,6 +27,17 @@ class FluviusOAuthConfigurationTest {
     }
 
     @Test
+    void configurationDescriptionDoesNotExposeCredentials() {
+        var properties = properties();
+        properties.put(PREFIX + "client-secret", "private-secret-marker");
+        properties.put(PREFIX + "client-id", "private-client-marker");
+        var description = bind(properties).toString();
+        assertFalse(description.contains("private-secret-marker"));
+        assertFalse(description.contains("private-client-marker"));
+        assertTrue(description.contains("CLIENT_SECRET"));
+    }
+
+    @Test
     void certificateModeBindsWithoutClientSecret() {
         var properties = properties();
         properties.remove(PREFIX + "client-secret");

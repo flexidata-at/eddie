@@ -107,15 +107,15 @@ class IdentifiableConsumptionRecordServiceTest {
 
     @Test
     void communityAllocationReachesOnlyItsCommunityPermission() {
-        var record = mock(EdaConsumptionRecord.class);
+        var consumptionRecord = mock(EdaConsumptionRecord.class);
         var today = LocalDate.now(ZoneId.systemDefault());
-        when(record.energyCommunityId()).thenReturn(Optional.of("ec-a"));
-        when(record.receiverMessageAddress()).thenReturn("community-party");
-        when(record.senderMessageAddress()).thenReturn("dsoId");
-        when(record.meteringPoint()).thenReturn("meteringPointId");
-        when(record.startDate()).thenReturn(today);
-        when(record.endDate()).thenReturn(today.plusDays(1));
-        when(record.lastReadingDate()).thenReturn(today);
+        when(consumptionRecord.energyCommunityId()).thenReturn(Optional.of("ec-a"));
+        when(consumptionRecord.receiverMessageAddress()).thenReturn("community-party");
+        when(consumptionRecord.senderMessageAddress()).thenReturn("dsoId");
+        when(consumptionRecord.meteringPoint()).thenReturn("meteringPointId");
+        when(consumptionRecord.startDate()).thenReturn(today);
+        when(consumptionRecord.endDate()).thenReturn(today.plusDays(1));
+        when(consumptionRecord.lastReadingDate()).thenReturn(today);
         when(repository.findByMeteringPointIdAndDateAndStateSentToPAOrAfterAccepted("meteringPointId", today))
                 .thenReturn(List.of(projection("communityA", "a", "need-a", "req-a", "a"),
                                     projection("communityB", "b", "need-b", "req-b", "b"),
@@ -127,31 +127,31 @@ class IdentifiableConsumptionRecordServiceTest {
         when(dataNeedsService.findById("need-master")).thenReturn(Optional.of(new AccountingPointDataNeed()));
         var service = new IdentifiableConsumptionRecordService(repository, dataNeedsService, configuration);
 
-        var result = service.mapToIdentifiableConsumptionRecord(record).orElseThrow();
+        var result = service.mapToIdentifiableConsumptionRecord(consumptionRecord).orElseThrow();
         assertThat(result.permissionRequests()).extracting(AtPermissionRequest::permissionId).containsExactly("communityA");
     }
 
     @Test
     void rejectsCommunityAllocationSentToDifferentMarketParty() {
-        var record = mock(EdaConsumptionRecord.class);
-        when(record.energyCommunityId()).thenReturn(Optional.of("ec-a"));
-        when(record.receiverMessageAddress()).thenReturn("ep");
+        var consumptionRecord = mock(EdaConsumptionRecord.class);
+        when(consumptionRecord.energyCommunityId()).thenReturn(Optional.of("ec-a"));
+        when(consumptionRecord.receiverMessageAddress()).thenReturn("ep");
         var service = new IdentifiableConsumptionRecordService(repository, dataNeedsService, configuration);
 
-        assertThat(service.mapToIdentifiableConsumptionRecord(record)).isEmpty();
+        assertThat(service.mapToIdentifiableConsumptionRecord(consumptionRecord)).isEmpty();
     }
 
     @Test
     void ordinaryReadingForSharedMarketPartyDoesNotReachCommunityPermission() {
-        var record = createConsumptionRecord("meteringPointId");
-        when(repository.findByMeteringPointIdAndDateAndStateSentToPAOrAfterAccepted("meteringPointId", record.startDate()))
+        var consumptionRecord = createConsumptionRecord("meteringPointId");
+        when(repository.findByMeteringPointIdAndDateAndStateSentToPAOrAfterAccepted("meteringPointId", consumptionRecord.startDate()))
                 .thenReturn(List.of(projection("history", "h", "need-history", "req-h", "h"),
                                     projection("communityA", "a", "need-a", "req-a", "a")));
         when(dataNeedsService.findById("need-history")).thenReturn(Optional.of(new ValidatedHistoricalDataDataNeed()));
         when(dataNeedsService.findById("need-a")).thenReturn(Optional.of(communityNeed("ec-a")));
         var service = new IdentifiableConsumptionRecordService(repository, dataNeedsService, configuration);
 
-        var result = service.mapToIdentifiableConsumptionRecord(record).orElseThrow();
+        var result = service.mapToIdentifiableConsumptionRecord(consumptionRecord).orElseThrow();
 
         assertThat(result.permissionRequests()).extracting(AtPermissionRequest::permissionId).containsExactly("history");
     }

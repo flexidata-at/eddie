@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
@@ -171,5 +172,56 @@ class CCMSHandlerTest {
         assertEquals(PermissionProcessStatus.FAILED_TO_TERMINATE, edaAnswerEventCaptor.getValue().status());
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "otherConversation,consentId,meteringPointId",
+            "conversationId,otherConsent,meteringPointId",
+            "conversationId,consentId,otherMeteringPoint"
+    })
+    void ignoresCommunityRejectionsOutsideThePermissionScope(String conversationId, String consentId, String meteringPointId) {
+        var response = new CMRequestStatus(NotificationMessageType.CCMS_REJECT, conversationId, null,
+                List.of(new ConsentData(List.of(ResponseCode.KnownResponseCodes.NO_CONSENT_PRESENT.getCode()),
+                        "No consent", Optional.of(consentId), Optional.of(meteringPointId))));
+        when(repository.findByConversationIdOrCMRequestId(conversationId, null))
+                .thenReturn(List.of(projection(PermissionProcessStatus.REQUIRES_EXTERNAL_TERMINATION)));
+        when(dataNeedsService.findById("dnid")).thenReturn(Optional.of(new CESUJoinRequestDataNeed(100,
+                Granularity.PT15M, Granularity.PT15M, EnergyDirection.CONSUMPTION, "community")));
+
+        handler.handleCCMSReject(response);
+
+        verifyNoInteractions(outbox);
+    }
+
+    static Stream<Arguments> communityRejectionCodes() {
+        var absent = ResponseCode.KnownResponseCodes.NO_CONSENT_PRESENT.getCode();
+        var expired = ResponseCode.KnownResponseCodes.CONSENT_ID_EXPIRED.getCode();
+        var invalid = ResponseCode.KnownResponseCodes.INVALID_PROCESSDATE.getCode();
+        return Stream.of(
+                Arguments.of(List.of(absent), PermissionProcessStatus.EXTERNALLY_TERMINATED),
+                Arguments.of(List.of(expired), PermissionProcessStatus.EXTERNALLY_TERMINATED),
+                Arguments.of(List.of(absent, expired), PermissionProcessStatus.EXTERNALLY_TERMINATED),
+                Arguments.of(List.of(absent, invalid), PermissionProcessStatus.FAILED_TO_TERMINATE),
+                Arguments.of(List.of(), PermissionProcessStatus.FAILED_TO_TERMINATE)
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("communityRejectionCodes")
+    void communityRejectionRequiresOnlyAbsentOrExpiredCodesToConfirmTermination(
+            List<Integer> responseCodes, PermissionProcessStatus expectedStatus
+    ) {
+        var response = new CMRequestStatus(NotificationMessageType.CCMS_REJECT, "conversationId", null,
+                List.of(new ConsentData(responseCodes, "Community rejection",
+                        Optional.of("consentId"), Optional.of("meteringPointId"))));
+        when(repository.findByConversationIdOrCMRequestId("conversationId", null))
+                .thenReturn(List.of(projection(PermissionProcessStatus.REQUIRES_EXTERNAL_TERMINATION)));
+        when(dataNeedsService.findById("dnid")).thenReturn(Optional.of(new CESUJoinRequestDataNeed(100,
+                Granularity.PT15M, Granularity.PT15M, EnergyDirection.CONSUMPTION, "community")));
+
+        handler.handleCCMSReject(response);
+
+        verify(outbox).commit(edaAnswerEventCaptor.capture());
+        assertEquals(expectedStatus, edaAnswerEventCaptor.getValue().status());
+    }
 
 }

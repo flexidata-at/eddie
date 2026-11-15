@@ -164,7 +164,7 @@ class ExternalTerminationHandlerTest {
     }
 
     @Test
-    void terminateCommunityPermission_unconfiguredCommunityDoesNotSendRevoke() throws Exception {
+    void terminateCommunityPermission_unconfiguredCommunityDoesNotSendRevoke() {
         var config = new AtConfiguration("rcid", null, "DEV", Set.of("community-a"));
         when(repository.findByPermissionId("pid")).thenReturn(Optional.of(communityPermission()));
         when(dataNeedsService.getById("dnid")).thenReturn(communityNeed("community-b"));
@@ -185,7 +185,7 @@ class ExternalTerminationHandlerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    void terminateCommunityPermission_missingConsentOrPointDoesNotSendRevoke(boolean missingConsent) throws Exception {
+    void terminateCommunityPermission_missingConsentOrPointDoesNotSendRevoke(boolean missingConsent) {
         var config = new AtConfiguration("rcid", null, "DEV", Set.of("community-a"));
         var permission = mock(AtPermissionRequest.class);
         when(repository.findByPermissionId("pid")).thenReturn(Optional.of(permission));

@@ -58,42 +58,40 @@ public class CCMSHandler {
                 .map(EdaPermissionRequest::fromProjection)
                 .toList()) {
             // the cmRequestId is not necessarily unique, only process marked permission requests
-            if (permissionRequest.status() != PermissionProcessStatus.REQUIRES_EXTERNAL_TERMINATION) {
-                continue;
+            if (permissionRequest.status() == PermissionProcessStatus.REQUIRES_EXTERNAL_TERMINATION) {
+                handleRejection(permissionRequest, cmRequestStatus);
             }
-
-            var isCesu = isCesu(permissionRequest);
-            if (isCesu && !matchesCesuReply(permissionRequest, cmRequestStatus)) {
-                continue;
-            }
-            var permissionId = permissionRequest.permissionId();
-            var responseCodes = cmRequestStatus.consentData().stream()
-                    .flatMap(data -> data.responseCodes().stream())
-                    .toList();
-            for (Integer statusCode : responseCodes) {
-                if (statusCode == ResponseCode.KnownResponseCodes.INVALID_PROCESSDATE.getCode()) {
-                    LOGGER.error(
-                            "Received a message that indicates that we send an invalid process date for the CMRevoke message for permission request '{}', this should never happen",
-                            permissionId);
-                } else if (statusCode == ResponseCode.KnownResponseCodes.CONSENT_AND_METERINGPOINT_DO_NOT_MATCH.getCode()) {
-                    LOGGER.error(
-                            "Received a message that indicates that the consent id and metering point id provided in the CMRevoke message do not match for permission request '{}', this should never happen",
-                            permissionId);
-                }
-            }
-
-            var absentOrExpired = !responseCodes.isEmpty() && responseCodes.stream().allMatch(code ->
-                    code == ResponseCode.KnownResponseCodes.NO_CONSENT_PRESENT.getCode()
-                    || code == ResponseCode.KnownResponseCodes.CONSENT_ID_EXPIRED.getCode());
-            var result = isCesu && !absentOrExpired
-                    ? PermissionProcessStatus.FAILED_TO_TERMINATE
-                    : PermissionProcessStatus.EXTERNALLY_TERMINATED;
-            outbox.commit(
-                    new EdaAnswerEvent(permissionId,
-                                       result,
-                                       cmRequestStatus.message())
-            );
         }
+    }
+
+    private void handleRejection(AtPermissionRequest permissionRequest, CMRequestStatus cmRequestStatus) {
+        var isCesu = isCesu(permissionRequest);
+        if (isCesu && !matchesCesuReply(permissionRequest, cmRequestStatus)) {
+            return;
+        }
+        var permissionId = permissionRequest.permissionId();
+        var responseCodes = cmRequestStatus.consentData().stream()
+                .flatMap(data -> data.responseCodes().stream())
+                .toList();
+        for (Integer statusCode : responseCodes) {
+            if (statusCode == ResponseCode.KnownResponseCodes.INVALID_PROCESSDATE.getCode()) {
+                LOGGER.error(
+                        "Received a message that indicates that we send an invalid process date for the CMRevoke message for permission request '{}', this should never happen",
+                        permissionId);
+            } else if (statusCode == ResponseCode.KnownResponseCodes.CONSENT_AND_METERINGPOINT_DO_NOT_MATCH.getCode()) {
+                LOGGER.error(
+                        "Received a message that indicates that the consent id and metering point id provided in the CMRevoke message do not match for permission request '{}', this should never happen",
+                        permissionId);
+            }
+        }
+
+        var absentOrExpired = !responseCodes.isEmpty() && responseCodes.stream().allMatch(code ->
+                code == ResponseCode.KnownResponseCodes.NO_CONSENT_PRESENT.getCode()
+                || code == ResponseCode.KnownResponseCodes.CONSENT_ID_EXPIRED.getCode());
+        var result = isCesu && !absentOrExpired
+                ? PermissionProcessStatus.FAILED_TO_TERMINATE
+                : PermissionProcessStatus.EXTERNALLY_TERMINATED;
+        outbox.commit(new EdaAnswerEvent(permissionId, result, cmRequestStatus.message()));
     }
 
     public void handleCCMSAnswer(CMRequestStatus cmRequestStatus) {

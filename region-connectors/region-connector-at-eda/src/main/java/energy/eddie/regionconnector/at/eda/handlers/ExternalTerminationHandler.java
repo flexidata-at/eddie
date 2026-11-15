@@ -65,11 +65,10 @@ public class ExternalTerminationHandler implements EventHandler<TerminationEvent
         AtPermissionRequest permissionRequest = request.get();
         try {
             var dataNeed = dataNeedsService.getById(permissionRequest.dataNeedId());
-            if (dataNeed instanceof CESUJoinRequestDataNeed cesuNeed) {
-                if (atConfiguration.resolveEnergyCommunityId(cesuNeed.energyCommunityId()).isEmpty()
-                        || permissionRequest.consentId().isEmpty() || permissionRequest.meteringPointId().isEmpty()) {
-                    throw new IllegalArgumentException("An authorized community, consent ID and accounting point are required for CESU termination");
-                }
+            if (dataNeed instanceof CESUJoinRequestDataNeed cesuNeed
+                    && (atConfiguration.resolveEnergyCommunityId(cesuNeed.energyCommunityId()).isEmpty()
+                        || permissionRequest.consentId().isEmpty() || permissionRequest.meteringPointId().isEmpty())) {
+                throw new IllegalArgumentException("An authorized community, consent ID and accounting point are required for CESU termination");
             }
             var consentEnd = ZonedDateTime.now(AT_ZONE_ID);
             var start = permissionRequest.start().atStartOfDay(AT_ZONE_ID);

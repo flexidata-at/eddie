@@ -24,6 +24,7 @@ import energy.eddie.regionconnector.aiida.permission.request.persistence.AiidaPe
 import energy.eddie.regionconnector.aiida.permission.request.persistence.AiidaPermissionRequestViewRepository;
 import energy.eddie.regionconnector.aiida.publisher.MqttEventPublisher;
 import energy.eddie.regionconnector.aiida.services.AiidaTransmissionScheduleProvider;
+import energy.eddie.regionconnector.shared.cim.IntermediatePermissionMarketDocumentFactory;
 import energy.eddie.regionconnector.shared.cim.v0_82.TransmissionScheduleProvider;
 import energy.eddie.regionconnector.shared.event.sourcing.EventBus;
 import energy.eddie.regionconnector.shared.event.sourcing.EventBusImpl;
@@ -135,13 +136,13 @@ public class AiidaBeanConfig {
             TransmissionScheduleProvider<AiidaPermissionRequest> transmissionScheduleProvider,
             @SuppressWarnings("SpringJavaInjectionPointsAutowiringInspection") DataNeedsService dataNeedsService
     ) {
+        var documentFactory = new IntermediatePermissionMarketDocumentFactory<>(configuration.customerId(),
+                transmissionScheduleProvider, cimConfig.eligiblePartyNationalCodingScheme().value(),
+                REGION_CONNECTOR_ZONE_ID);
         return new PermissionMarketDocumentMessageHandler<>(eventBus,
                                                             repository,
                                                             dataNeedsService,
-                                                            configuration.customerId(),
-                                                            cimConfig,
-                                                            transmissionScheduleProvider,
-                                                            REGION_CONNECTOR_ZONE_ID,
+                                                            documentFactory,
                                                             () -> repository.findByStatusIn(
                                                                     EnumSet.allOf(PermissionProcessStatus.class)));
     }

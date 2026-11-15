@@ -99,7 +99,7 @@ public class IdentifiableConsumptionRecordService {
     private boolean matchesScope(
             AtPermissionRequestProjection permission,
             DataNeed dataNeed,
-            EdaConsumptionRecord record,
+            EdaConsumptionRecord consumptionRecord,
             Optional<String> communityId,
             LocalDate lastReadingDate
     ) {
@@ -110,7 +110,7 @@ public class IdentifiableConsumptionRecordService {
         var status = permission.getStatus();
         return dataNeed instanceof CESUJoinRequestDataNeed cesuNeed
                 && configuration.resolveEnergyCommunityId(cesuNeed.energyCommunityId()).equals(communityId)
-                && permission.getDsoId().equals(record.senderMessageAddress())
+                && permission.getDsoId().equals(consumptionRecord.senderMessageAddress())
                 && (PermissionProcessStatus.ACCEPTED.name().equals(status)
                     || PermissionProcessStatus.FULFILLED.name().equals(status))
                 && (permissionEnd == null || !lastReadingDate.isAfter(permissionEnd));
