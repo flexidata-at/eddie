@@ -3,11 +3,15 @@
 package energy.eddie.regionconnector.at.eda.energysharing;
 
 import energy.eddie.api.agnostic.energysharing.*;
+import de.ponton.xp.adapter.api.messages.OutboundMessage;
+import energy.eddie.regionconnector.at.eda.config.AtConfiguration;
 import energy.eddie.regionconnector.at.eda.persistence.EnergySharingRecord;
 import energy.eddie.regionconnector.at.eda.ponton.messenger.MessengerStatus;
 import energy.eddie.regionconnector.at.eda.ponton.messenger.PontonMessengerConnection;
+import energy.eddie.regionconnector.at.eda.requests.EdaGroupingIdFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -34,6 +38,8 @@ class EdaEnergySharingServiceTest {
     private final PontonMessengerConnection transport = mock(PontonMessengerConnection.class);
     private final Map<String, EnergySharingRecord> records = new LinkedHashMap<>();
     private final MovingClock clock = new MovingClock();
+    private final EdaGroupingIdFactory groupingIds =
+            new EdaGroupingIdFactory(new AtConfiguration("EP100022", null, "DATADEV"));
     private EdaEnergySharingService service;
 
     @BeforeEach
@@ -57,7 +63,7 @@ class EdaEnergySharingServiceTest {
         when(transport.supportsEnergySharing()).thenReturn(true);
         when(transport.messengerStatus()).thenReturn(new MessengerStatus(Map.of(), true));
         var binding = new EdaEnergySharingConfiguration.Binding(CONNECTION, OPERATOR, Map.of(EC, DSO), true);
-        service = new EdaEnergySharingService(new EdaEnergySharingConfiguration(List.of(binding)), store, transport, mapper, clock);
+        service = new EdaEnergySharingService(new EdaEnergySharingConfiguration(List.of(binding)), store, transport, mapper, groupingIds, clock);
     }
 
     @Test
@@ -84,6 +90,33 @@ class EdaEnergySharingServiceTest {
                 assertThrows(EnergySharingException.class, () -> service.submit(changed)).code());
         assertThrows(EnergySharingException.class,
                 () -> service.operation("query", "another-application", OPERATOR, EC));
+    }
+
+    @Test
+    void sharedMessengerRoutingPrefixPreservesWireCorrelationAndTenantScope() throws Exception {
+        var first = service.submit(request("routed-one", "SYNC_MASTER_DATA", mapper.createObjectNode()));
+        var second = service.submit(request("routed-two", "SYNC_MASTER_DATA", mapper.createObjectNode()));
+        assertNotEquals(first.marketMessageId(), second.marketMessageId());
+        var messages = ArgumentCaptor.forClass(OutboundMessage.class);
+        verify(transport, times(2)).sendEnergySharing(messages.capture());
+        var operations = List.of(first, second);
+        for (int index = 0; index < operations.size(); index++) {
+            var operation = operations.get(index);
+            var id = Objects.requireNonNull(operation.marketMessageId());
+            assertTrue(id.startsWith("DATADEV"));
+            assertTrue(id.matches("[0-9A-Za-z]{1,35}"));
+            var xml = messages.getAllValues().get(index).getInputStream().readAllBytes();
+            EdaEnergySharingXml.validate(xml, "CPRequest_01p12.xsd");
+            var document = EdaEnergySharingXml.parse(xml);
+            assertEquals(id, document.getElementsByTagNameNS(COMMON, "ConversationId").item(0).getTextContent());
+            assertEquals(id, document.getElementsByTagNameNS(COMMON, "MessageId").item(0).getTextContent());
+        }
+        assertTrue(service.receive("SENDEN_ECP", list(first.marketMessageId(), "RoutedReply", "SENDEN_ECP", "", DSO)));
+        assertEquals("COMPLETED", service.operation("routed-one", CONNECTION, OPERATOR, EC).orElseThrow().status());
+        assertEquals("SUBMITTED", service.operation("routed-two", CONNECTION, OPERATOR, EC).orElseThrow().status());
+        assertFalse(service.receive("SENDEN_ECP", list("DATADEVUnknownConversation", "UnownedReply", "SENDEN_ECP", "", DSO)));
+        assertThrows(EnergySharingException.class,
+                () -> service.operation("routed-one", "another-application", OPERATOR, EC));
     }
 
     @Test
@@ -236,7 +269,7 @@ class EdaEnergySharingServiceTest {
         var secondConnection = "application-two";
         var otherService = new EdaEnergySharingService(new EdaEnergySharingConfiguration(List.of(
                 new EdaEnergySharingConfiguration.Binding(secondConnection, OPERATOR, Map.of(EC, DSO), true))),
-                store, transport, mapper, clock);
+                store, transport, mapper, groupingIds, clock);
         var crossConnection = new EnergySharingRequest("factor-third", secondConnection, OPERATOR, EC,
                 "CHANGE_PARTICIPATION_FACTOR", EdaEnergySharingXml.VERSION, parameters);
         assertEquals(EnergySharingException.Code.CONFLICT,

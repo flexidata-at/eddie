@@ -8,6 +8,7 @@ import energy.eddie.api.agnostic.energysharing.*;
 import energy.eddie.cim.v1_12.StandardCodingSchemeTypeList;
 import energy.eddie.regionconnector.at.eda.persistence.EnergySharingRecord;
 import energy.eddie.regionconnector.at.eda.ponton.messenger.PontonMessengerConnection;
+import energy.eddie.regionconnector.at.eda.requests.EdaGroupingIdFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.jspecify.annotations.Nullable;
@@ -33,15 +34,16 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
     private final PontonMessengerConnection transport;
     private final ObjectMapper mapper;
     private final Clock clock;
+    private final EdaGroupingIdFactory groupingIds;
 
     @Autowired
     public EdaEnergySharingService(EdaEnergySharingConfiguration config,EdaEnergySharingStore store,
-                                  PontonMessengerConnection transport,ObjectMapper mapper) {
-        this(config,store,transport,mapper,Clock.systemUTC());
+                                  PontonMessengerConnection transport,ObjectMapper mapper,EdaGroupingIdFactory groupingIds) {
+        this(config,store,transport,mapper,groupingIds,Clock.systemUTC());
     }
     EdaEnergySharingService(EdaEnergySharingConfiguration config,EdaEnergySharingStore store,
-                           PontonMessengerConnection transport,ObjectMapper mapper,Clock clock) {
-        this.config=config;this.store=store;this.transport=transport;this.mapper=mapper;this.clock=clock;
+                           PontonMessengerConnection transport,ObjectMapper mapper,EdaGroupingIdFactory groupingIds,Clock clock) {
+        this.config=config;this.store=store;this.transport=transport;this.mapper=mapper;this.groupingIds=groupingIds;this.clock=clock;
         transport.withEnergySharingHandler(new EnergySharingMessageHandler() {
             @Override public boolean handle(String code,byte[] xml){return receive(code,xml);}
             @Override public void transportStatus(String id,String state) {
@@ -96,7 +98,7 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
             if(snapshot.isEmpty()||!"S".equals(mapper.readTree(snapshot.get().payload()).path("snapshot").path("allocationMethod").asText()))
                 throw error(INVALID_REQUEST,"A confirmed existing static community snapshot is required for ECShare");
         }
-        String marketId="ES"+UUID.randomUUID().toString().replace("-","");
+        String marketId=groupingIds.createRandomId();
         var message=EdaEnergySharingXml.create(withSyncDefaults(request),dso,marketId,clock);
         if(request.operation().startsWith("CHANGE_"))reserveDailyChange(request,id);
         var operation=new EnergySharingOperation(request.requestId(),request.connectionId(),request.operatorId(),request.communityId(),request.operation(),"QUEUED",clock.instant(),clock.instant(),marketId,null,null,mapper.createObjectNode());
@@ -119,7 +121,7 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
         var children=mapper.createArrayNode();int index=0;
         for(String communityId:new TreeSet<>(binding.communities().keySet())) {
             var child=new EnergySharingRequest(request.requestId()+"-"+ ++index,request.connectionId(),request.operatorId(),communityId,request.operation(),request.profileVersion(),request.parameters());
-            EdaEnergySharingXml.create(withSyncDefaults(child),community(binding,communityId),"ES"+UUID.randomUUID().toString().replace("-",""),clock);
+            EdaEnergySharingXml.create(withSyncDefaults(child),community(binding,communityId),groupingIds.createRandomId(),clock);
             children.add(mapper.valueToTree(child));
         }
         var now=clock.instant();var result=mapper.createObjectNode();result.set("children",children);

@@ -73,6 +73,10 @@ community and client request ID. A repeated ID with different parameters fails.
 The intent is committed before transport; an ambiguous send becomes
 RECONCILIATION_REQUIRED. PONTON sends for this workflow are not blindly retried.
 The same ID never sends a second copy after an uncertain result.
+New management message/conversation IDs retain the configured
+`region-connector.at.eda.conversation-id.prefix`, so shared PONTON agreements can
+route replies to the correct adapter. Their random suffix keeps requests unique
+even within the same millisecond, within EDA's 35-character alphanumeric limit.
 
 Replies are routed by the persisted market conversation and checked against
 sender, receiver, community, meter, operation and pinned schema. Transport
