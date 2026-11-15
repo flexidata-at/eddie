@@ -87,10 +87,13 @@ public class ManagementApiConfig {
             var contextPath = contextPath(httpRequest);
             var isRequestOnManagementPort = httpRequest.getLocalPort() == managementPort;
             var requestURI = httpRequest.getRequestURI();
-            var isRequestOnManagementUrl = requestURI.startsWith(contextPath + CoreSpringConfig.DATA_NEEDS_URL_MAPPING_PREFIX + managementUrlPrefix)
-                                           || requestURI.startsWith(contextPath + "/outbound-connectors")
-                                           || requestURI.startsWith(contextPath + managementUrlPrefix)
-                                           || requestURI.matches(contextPath + "/region-connectors/[\\w\\-]+%s/.*".formatted(
+            // Servlet paths are decoded and normalized by Tomcat before servlet mapping. Comparing
+            // the raw URI would allow an encoded prefix to reach a management handler on the public port.
+            var applicationPath = applicationPath(httpRequest, contextPath);
+            var isRequestOnManagementUrl = applicationPath.startsWith(CoreSpringConfig.DATA_NEEDS_URL_MAPPING_PREFIX + managementUrlPrefix)
+                                           || applicationPath.startsWith("/outbound-connectors")
+                                           || applicationPath.startsWith(managementUrlPrefix)
+                                           || applicationPath.matches("/region-connectors/[\\w\\-]+%s/.*".formatted(
                     managementUrlPrefix));
             IEF_LOGGER.debug("{} requested on port {}, managementPort: {}, managementUrl: {}",
                              requestURI,
@@ -104,6 +107,18 @@ public class ManagementApiConfig {
             } else {
                 ((HttpServletResponse) response).sendError(HttpServletResponse.SC_NOT_FOUND);
             }
+        }
+
+        private static String applicationPath(HttpServletRequest request, String contextPath) {
+            var servletPath = request.getServletPath();
+            var pathInfo = request.getPathInfo();
+            var mappedPath = servletPath + (pathInfo == null ? "" : pathInfo);
+            if (!mappedPath.isEmpty()) {
+                return mappedPath;
+            }
+            // An unmapped request (and simple servlet mocks) has no container mapping yet.
+            var uri = request.getRequestURI();
+            return uri.startsWith(contextPath) ? uri.substring(contextPath.length()) : uri;
         }
 
         @SuppressWarnings("java:S1075")
