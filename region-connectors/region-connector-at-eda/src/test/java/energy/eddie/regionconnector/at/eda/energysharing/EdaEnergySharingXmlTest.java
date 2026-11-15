@@ -135,7 +135,8 @@ class EdaEnergySharingXmlTest {
         var xml = new String(result.xml(), StandardCharsets.UTF_8);
         assertTrue(xml.contains("ECPartFact>25"));
         assertTrue(xml.contains("ECShare>22.1234"));
-        assertEquals(LocalDate.of(2026, 12, 29), EdaEnergySharingXml.workdayLimit(LocalDate.of(2026, 11, 15)));
+        assertEquals(LocalDate.of(2026, Month.DECEMBER, 29),
+                EdaEnergySharingXml.workdayLimit(LocalDate.of(2026, Month.NOVEMBER, 15)));
     }
 
     @Test void malformedAndOverflowingQueryRangesRemainInvalidRequests() {

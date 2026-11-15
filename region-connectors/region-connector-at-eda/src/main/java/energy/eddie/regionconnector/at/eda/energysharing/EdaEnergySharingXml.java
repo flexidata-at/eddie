@@ -60,8 +60,15 @@ public final class EdaEnergySharingXml {
     private static final Set<String> DIRECTIONS = Set.of(CONSUMPTION, "GENERATION");
     private static final Set<String> TRANSMISSION_CYCLES = Set.of("D", "M", "V");
     private static final Set<MonthDay> FIXED_HOLIDAYS = Set.of(
-            MonthDay.of(1, 1), MonthDay.of(1, 6), MonthDay.of(5, 1), MonthDay.of(8, 15),
-            MonthDay.of(10, 26), MonthDay.of(11, 1), MonthDay.of(12, 8), MonthDay.of(12, 25), MonthDay.of(12, 26)
+            MonthDay.of(Month.JANUARY, 1),
+            MonthDay.of(Month.JANUARY, 6),
+            MonthDay.of(Month.MAY, 1),
+            MonthDay.of(Month.AUGUST, 15),
+            MonthDay.of(Month.OCTOBER, 26),
+            MonthDay.of(Month.NOVEMBER, 1),
+            MonthDay.of(Month.DECEMBER, 8),
+            MonthDay.of(Month.DECEMBER, 25),
+            MonthDay.of(Month.DECEMBER, 26)
     );
 
     public record Message(String code, String schemaSet, String version, byte[] xml) {
@@ -76,9 +83,9 @@ public final class EdaEnergySharingXml {
 
         @Override
         public boolean equals(Object other) {
-            return other instanceof Message message
-                    && code.equals(message.code) && schemaSet.equals(message.schemaSet)
-                    && version.equals(message.version) && Arrays.equals(xml, message.xml);
+            return other instanceof Message(var otherCode, var otherSchemaSet, var otherVersion, var otherXml)
+                    && code.equals(otherCode) && schemaSet.equals(otherSchemaSet)
+                    && version.equals(otherVersion) && Arrays.equals(xml, otherXml);
         }
 
         @Override
