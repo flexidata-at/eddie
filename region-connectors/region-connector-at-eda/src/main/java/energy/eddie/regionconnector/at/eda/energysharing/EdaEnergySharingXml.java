@@ -40,6 +40,7 @@ public final class EdaEnergySharingXml {
     public static final String PROFILE = "AT-EDA-BEM";
     public static final String VERSION = "2026-10-05";
     public static final ZoneId VIENNA = ZoneId.of("Europe/Vienna");
+    private static final String XML_FALSE = "false";
     private static final String CT = "http://www.ebutilities.at/schemata/customerprocesses/common/types/01p20";
     private static final String CM_REQUEST = "CMRequest";
     private static final String EC_MP_LIST = "ECMPList";
@@ -159,7 +160,7 @@ public final class EdaEnergySharingXml {
         var directory = child(root, profile.namespace(), "MarketParticipantDirectory", null);
         directory.setAttribute("SchemaVersion", profile.version());
         directory.setAttribute("DocumentMode", "PROD");
-        directory.setAttribute("Duplicate", "false");
+        directory.setAttribute("Duplicate", XML_FALSE);
         var routing = child(directory, CT, "ct:RoutingHeader", null);
         address(routing, "Sender", operator);
         address(routing, "Receiver", dso);
@@ -252,7 +253,7 @@ public final class EdaEnergySharingXml {
         }
         child(extension, namespace, "DateTimeFrom", start.atStartOfDay(VIENNA).toOffsetDateTime().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
         child(extension, namespace, "DateTimeTo", end.plusDays(1).atStartOfDay(VIENNA).toOffsetDateTime().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
-        child(extension, namespace, "AssumptionOfCosts", "false");
+        child(extension, namespace, "AssumptionOfCosts", XML_FALSE);
     }
 
     private static void addMeasurementRequest(Element directory, String namespace, EnergySharingRequest request, LocalDate today) {
@@ -264,7 +265,7 @@ public final class EdaEnergySharingXml {
         optionalEnum(extension, namespace, parameters, "meteringInterval", "MeteringIntervall", Set.of("QH", "H", "D", "V"));
         child(extension, namespace, "DateTimeFrom", date(parameters, START).atStartOfDay(VIENNA).toOffsetDateTime().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
         child(extension, namespace, "DateTimeTo", date(parameters, END).plusDays(1).atStartOfDay(VIENNA).toOffsetDateTime().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
-        child(extension, namespace, "AssumptionOfCosts", "false");
+        child(extension, namespace, "AssumptionOfCosts", XML_FALSE);
     }
 
     private static void addFactorChange(Element directory, String namespace, EnergySharingRequest request,

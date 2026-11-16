@@ -148,7 +148,8 @@ final class EdaMeasurementRequestPolicy {
 
   static LocalDate afterWorkingDays(LocalDate date, int days) {
     var result = date;
-    for (int remaining = days; remaining > 0; ) {
+    int remaining = days;
+    while (remaining > 0) {
       result = result.plusDays(1);
       if (marketWorkingDay(result)) remaining--;
     }
@@ -161,7 +162,7 @@ final class EdaMeasurementRequestPolicy {
     return day.getDayOfWeek().getValue() < 6
         && !EdaEnergySharingXml.holiday(day)
         && !day.equals(EdaEnergySharingXml.easterSunday(day.getYear()).minusDays(2))
-        && !(day.getMonth() == Month.DECEMBER && Set.of(24, 31).contains(day.getDayOfMonth()));
+        && !(Month.DECEMBER.equals(day.getMonth()) && Set.of(24, 31).contains(day.getDayOfMonth()));
   }
 
   static void validateReply(String code, Element directory, String originalId) {
