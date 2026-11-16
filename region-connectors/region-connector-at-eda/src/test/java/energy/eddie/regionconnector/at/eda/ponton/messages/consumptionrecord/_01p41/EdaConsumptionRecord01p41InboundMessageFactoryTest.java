@@ -95,12 +95,12 @@ class EdaConsumptionRecord01p41InboundMessageFactoryTest {
         try (var input = getClass().getResourceAsStream("/xsd/consumptionrecord/_01p41/consumptionrecord_daily.xml")) {
             source = java.util.Objects.requireNonNull(input).readAllBytes();
         }
-        var record = factory.parseInputStream(new java.io.ByteArrayInputStream(source));
-        assertArrayEquals(source, record.originalXml().orElseThrow());
-        byte[] altered = record.originalXml().orElseThrow();
+        var consumptionRecord = factory.parseInputStream(new java.io.ByteArrayInputStream(source));
+        assertArrayEquals(source, consumptionRecord.originalXml().orElseThrow());
+        byte[] altered = consumptionRecord.originalXml().orElseThrow();
         altered[0] = 0;
-        assertArrayEquals(source, record.originalXml().orElseThrow());
-        assertFalse(record.toString().contains("MarketParticipantDirectory"));
+        assertArrayEquals(source, consumptionRecord.originalXml().orElseThrow());
+        assertFalse(consumptionRecord.toString().contains("MarketParticipantDirectory"));
         var tooLarge = new java.io.ByteArrayInputStream(new byte[EdaConsumptionRecord01p41InboundMessageFactory.MAX_MESSAGE_BYTES + 1]);
         assertThrows(org.springframework.oxm.UnmarshallingFailureException.class, () -> factory.parseInputStream(tooLarge));
     }

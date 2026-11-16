@@ -27,8 +27,8 @@ class EdaOperatorMeasurementServiceTest {
             assertFalse(proof.path("timePeriods").isEmpty());
             return null;
         }).when(store).append(anyString(), anyString(), anyString(), any(), any(), any());
-        var record = record(xml("M1"));
-        assertTrue(service.ingest(record));
+        var consumptionRecord = consumptionRecord(xml("M1"));
+        assertTrue(service.ingest(consumptionRecord));
         verify(store).append(anyString(), anyString(), anyString(), argThat(doc -> doc.meteringPointId().equals(METER)),
                 argThat(source -> java.util.Arrays.equals(source, bytes(xml("M1")))), any());
     }
@@ -47,7 +47,7 @@ class EdaOperatorMeasurementServiceTest {
             assertEquals("2024-03-01", proof.path("timePeriods").get(0).path("activate").asText());
             return null;
         }).when(store).append(anyString(), anyString(), anyString(), any(), any(), any());
-        assertTrue(service.ingest(record(xml("M1"))));
+        assertTrue(service.ingest(consumptionRecord(xml("M1"))));
     }
 
     @Test void duplicateQualifiedRosterIdentityIsAmbiguousAndCannotAuthorize() {
@@ -60,20 +60,20 @@ class EdaOperatorMeasurementServiceTest {
     @Test void missingAuthoritativeRosterRequestsTransportRetryWithoutInventingMembership() throws Exception {
         doThrow(new EnergySharingException(EnergySharingException.Code.NOT_READY, "Roster missing"))
                 .when(store).append(anyString(), anyString(), anyString(), any(), any(), any());
-        var record = record(xml("M1"));
-        assertThrows(IllegalStateException.class, () -> service.ingest(record));
+        var consumptionRecord = consumptionRecord(xml("M1"));
+        assertThrows(IllegalStateException.class, () -> service.ingest(consumptionRecord));
     }
 
     @Test void unconfiguredReceiverAndNonCommunityDocumentsFallThroughToLegacyPath() throws Exception {
-        assertFalse(service.ingest(record(xml("M1").replace("CC000001", "CC000002"))));
-        assertFalse(service.ingest(record(xml("M1").replace("<cp:ECID>" + COMMUNITY + "</cp:ECID>", ""))));
+        assertFalse(service.ingest(consumptionRecord(xml("M1").replace("CC000001", "CC000002"))));
+        assertFalse(service.ingest(consumptionRecord(xml("M1").replace("<cp:ECID>" + COMMUNITY + "</cp:ECID>", ""))));
         verifyNoInteractions(store);
     }
 
     @Test void wrongDsoAndMalformedOwnedSchemaCannotPersist() throws Exception {
-        var foreign = record(xml("M1").replace("AT000000</ct:MessageAddress>", "AT000009</ct:MessageAddress>"));
+        var foreign = consumptionRecord(xml("M1").replace("AT000000</ct:MessageAddress>", "AT000009</ct:MessageAddress>"));
         assertThrows(EnergySharingException.class, () -> service.ingest(foreign));
-        var incomplete = record(xml("M1").replace("<cp:MM>L1</cp:MM>", ""));
+        var incomplete = consumptionRecord(xml("M1").replace("<cp:MM>L1</cp:MM>", ""));
         assertThrows(EnergySharingException.class, () -> service.ingest(incomplete));
         verifyNoInteractions(store);
     }

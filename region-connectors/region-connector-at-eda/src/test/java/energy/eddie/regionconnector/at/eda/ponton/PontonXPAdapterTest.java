@@ -290,23 +290,23 @@ class PontonXPAdapterTest {
 
     @Test
     void operatorOnlyRecordIsAcknowledgedWithoutReschedulingOrCustomerGrant() {
-        EdaConsumptionRecord record = new SimpleEdaConsumptionRecord();
+        EdaConsumptionRecord consumptionRecord = new SimpleEdaConsumptionRecord();
         pontonXPAdapter.withOperatorConsumptionRecords(ignored -> true);
-        when(identifiableConsumptionRecordService.mapToIdentifiableConsumptionRecord(record)).thenReturn(Optional.empty());
-        var result = pontonMessengerConnection.consumptionRecordHandler.handle(record);
+        when(identifiableConsumptionRecordService.mapToIdentifiableConsumptionRecord(consumptionRecord)).thenReturn(Optional.empty());
+        var result = pontonMessengerConnection.consumptionRecordHandler.handle(consumptionRecord);
         assertEquals(InboundStatusEnum.SUCCESS, result.status());
         org.mockito.Mockito.verifyNoInteractions(taskScheduler);
     }
 
     @Test
     void operatorPersistenceStillEmitsExistingCustomerConsentStream() {
-        EdaConsumptionRecord record = new SimpleEdaConsumptionRecord();
-        var identified = new IdentifiableConsumptionRecord(record, List.of(), null, null);
+        EdaConsumptionRecord consumptionRecord = new SimpleEdaConsumptionRecord();
+        var identified = new IdentifiableConsumptionRecord(consumptionRecord, List.of(), null, null);
         var stored = new java.util.concurrent.atomic.AtomicBoolean();
         pontonXPAdapter.withOperatorConsumptionRecords(ignored -> { stored.set(true); return true; });
-        when(identifiableConsumptionRecordService.mapToIdentifiableConsumptionRecord(record)).thenReturn(Optional.of(identified));
+        when(identifiableConsumptionRecordService.mapToIdentifiableConsumptionRecord(consumptionRecord)).thenReturn(Optional.of(identified));
         var verifier = StepVerifier.create(pontonXPAdapter.getConsumptionRecordStream()).expectNext(identified).expectComplete();
-        assertEquals(InboundStatusEnum.SUCCESS, pontonMessengerConnection.consumptionRecordHandler.handle(record).status());
+        assertEquals(InboundStatusEnum.SUCCESS, pontonMessengerConnection.consumptionRecordHandler.handle(consumptionRecord).status());
         assertTrue(stored.get());
         pontonXPAdapter.close();
         verifier.verify();

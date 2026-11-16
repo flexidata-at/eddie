@@ -30,7 +30,8 @@ class EnergySharingMeasurementTest {
         assertEquals(1, document.readings().size());
         assertEquals("L1", reading.nativeParameters().path("MM").asText());
         assertEquals("L1", document.nativeParameters().path("MM").asText());
-        assertThrows(UnsupportedOperationException.class, () -> page.documents().clear());
+        var pageDocuments = page.documents();
+        assertThrows(UnsupportedOperationException.class, pageDocuments::clear);
     }
 
     @Test void existingNationalImplementationsDefaultToUnsupportedWithoutImplementingAnAtFeed() {

@@ -48,7 +48,7 @@ final class OperatorMeasurementFixtures {
                 """.formatted(message, METER, COMMUNITY);
     }
 
-    static EdaConsumptionRecord record(String xml) throws Exception {
+    static EdaConsumptionRecord consumptionRecord(String xml) throws Exception {
         var marshaller = new Jaxb2Marshaller();
         marshaller.setPackagesToScan("at.ebutilities.schemata");
         marshaller.afterPropertiesSet();

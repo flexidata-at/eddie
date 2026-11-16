@@ -27,6 +27,7 @@ final class EdaOperatorMeasurementXml {
     static final int MAX_READINGS = 100_000;
     // Reserve 1 MiB for the scope/page envelope under the public 32 MiB response bound.
     static final int MAX_JSON_BYTES = 31 * 1024 * 1024;
+    private static final String METER_CODE = "MeterCode";
     private static final String NS = "http://www.ebutilities.at/schemata/customerprocesses/consumptionrecord/01p41";
     private static final String COMMON = "http://www.ebutilities.at/schemata/customerprocesses/common/types/01p20";
     private static final Map<String, String> TAGS = Map.ofEntries(
@@ -96,14 +97,12 @@ final class EdaOperatorMeasurementXml {
                 if (readings.size() >= MAX_READINGS) throw invalid("Consumption record exceeds 100000 readings");
                 var start = instant(value(position, NS, "DTF"));
                 var end = instant(value(position, NS, "DTT"));
-                if (!start.isBefore(end) || start.isBefore(periodStart) || end.isAfter(periodEnd)) {
-                    throw invalid("Reading interval is outside its declared energy period");
-                }
+                requireWithinPeriod(start, end, periodStart, periodEnd);
                 var nativeData = mapper.createObjectNode();
                 for (String field : List.of("DTF", "DTT", "MM", "BQ")) {
                     nativeData.put(field, value(position, NS, field));
                 }
-                nativeData.put("MeterCode", data.getAttribute("MeterCode"));
+                nativeData.put(METER_CODE, data.getAttribute(METER_CODE));
                 nativeData.put("UOM", data.getAttribute("UOM"));
                 nativeData.put("energyIndex", energyIndex);
                 nativeData.put("dataIndex", dataIndex);
@@ -112,13 +111,19 @@ final class EdaOperatorMeasurementXml {
                     nativeData.put(field, value(energy, NS, field));
                 }
                 copyOptional(energy, NS, "MeteringReason", nativeData);
-                String meterCode = data.getAttribute("MeterCode");
+                String meterCode = data.getAttribute(METER_CODE);
                 nativeData.put("semanticRole", TAGS.getOrDefault(meterCode, "UNKNOWN"));
                 readings.add(new EnergySharingMeasurement(start, end, new BigDecimal(value(position, NS, "BQ")),
                         data.getAttribute("UOM"), meterCode, meterCode,
                         value(position, NS, "MM"), interval, nativeData));
             }
             dataIndex++;
+        }
+    }
+
+    private static void requireWithinPeriod(Instant start, Instant end, Instant periodStart, Instant periodEnd) {
+        if (!start.isBefore(end) || start.isBefore(periodStart) || end.isAfter(periodEnd)) {
+            throw invalid("Reading interval is outside its declared energy period");
         }
     }
 
@@ -168,8 +173,8 @@ final class EdaOperatorMeasurementXml {
         var attributes = new TreeMap<String, String>();
         for (int i = 0; i < element.getAttributes().getLength(); i++) {
             var attribute = element.getAttributes().item(i);
-            if (XMLConstants.XMLNS_ATTRIBUTE_NS_URI.equals(attribute.getNamespaceURI())) continue;
-            if ("MarketParticipantDirectory".equals(element.getLocalName()) && "Duplicate".equals(attribute.getNodeName())) continue;
+            if (XMLConstants.XMLNS_ATTRIBUTE_NS_URI.equals(attribute.getNamespaceURI())
+                    || ("MarketParticipantDirectory".equals(element.getLocalName()) && "Duplicate".equals(attribute.getNodeName()))) continue;
             attributes.put(Objects.toString(attribute.getNamespaceURI(), "") + ":" + attribute.getNodeName(), attribute.getNodeValue());
         }
         attributes.forEach((key, value) -> { token(digest, key); token(digest, value); });

@@ -19,6 +19,7 @@ import static energy.eddie.api.agnostic.energysharing.EnergySharingException.Cod
 /** Operator rights come solely from verified configuration and authoritative EDA membership, never CESU. */
 @Component
 public class EdaOperatorMeasurementService {
+    private static final String TIME_PERIODS = "timePeriods";
     private final EdaEnergySharingConfiguration configuration;
     private final EdaOperatorMeasurementStore store;
     private final ObjectMapper mapper;
@@ -32,18 +33,18 @@ public class EdaOperatorMeasurementService {
         this.parser = new EdaOperatorMeasurementXml(mapper);
     }
 
-    public boolean ingest(EdaConsumptionRecord record) {
-        var community = record.energyCommunityId();
+    public boolean ingest(EdaConsumptionRecord consumptionRecord) {
+        var community = consumptionRecord.energyCommunityId();
         if (community.isEmpty()) return false;
         var bindings = configuration.bindings().stream().filter(binding -> binding.partnerConfigured()
-                && binding.operatorId().equals(record.receiverMessageAddress())
+                && binding.operatorId().equals(consumptionRecord.receiverMessageAddress())
                 && binding.communities().containsKey(community.get())).toList();
         if (bindings.isEmpty()) return false;
-        byte[] bytes = record.originalXml().orElseThrow(() -> new EnergySharingException(INVALID_REQUEST, "Exact native operator document is required"));
+        byte[] bytes = consumptionRecord.originalXml().orElseThrow(() -> new EnergySharingException(INVALID_REQUEST, "Exact native operator document is required"));
         var parsed = parser.parse(bytes, Instant.now());
         var document = parsed.document();
-        if (!community.get().equals(parsed.communityId()) || !record.messageId().equals(document.sourceMessageId())
-                || !record.meteringPoint().equals(document.meteringPointId())) {
+        if (!community.get().equals(parsed.communityId()) || !consumptionRecord.messageId().equals(document.sourceMessageId())
+                || !consumptionRecord.meteringPoint().equals(document.meteringPointId())) {
             throw new EnergySharingException(INVALID_REQUEST, "Wire and parsed consumption record disagree");
         }
         for (var binding : bindings) {
@@ -112,7 +113,7 @@ public class EdaOperatorMeasurementService {
         evidence.put("snapshotRevision", snapshot.revision());
         evidence.put("snapshotReceivedAt", snapshot.receivedAt().toString());
         evidence.put("snapshotSha256", EdaOperatorMeasurementXml.hash(payload.getBytes(StandardCharsets.UTF_8)));
-        evidence.set("timePeriods", point.nativeParameters().path("timePeriods").deepCopy());
+        evidence.set(TIME_PERIODS, point.nativeParameters().path(TIME_PERIODS).deepCopy());
         return evidence;
     }
 
@@ -137,7 +138,7 @@ public class EdaOperatorMeasurementService {
 
     private static boolean covers(EnergySharingMeteringPoint point, EnergySharingMeasurementDocument document) {
             var periods = new java.util.ArrayList<Period>();
-            for (var period : point.nativeParameters().path("timePeriods")) {
+            for (var period : point.nativeParameters().path(TIME_PERIODS)) {
                 if (!period.hasNonNull("start") || !period.hasNonNull("end") || !period.hasNonNull("activate")) continue;
                 LocalDate from = LocalDate.parse(period.path("start").asText());
                 LocalDate to = LocalDate.parse(period.path("end").asText());
