@@ -404,11 +404,15 @@ class EdaEnergySharingServiceTest {
     @Test
     void unsolicitedRevocationTrimsOnlyMatchingMembershipAndStaysDeduplicatedAfterResync() {
         seedAnnualRoster();
+        var originalConfirmation = service.communities(OPERATOR, CONNECTION).getFirst().nativeParameters().path("masterDataReceivedAt").asText();
+        assertFalse(originalConfirmation.isBlank());
         clock.advance();
         var revoke = revocation("CustomerRevocation", "2026-11-14", "2026-11-15T10:31:00+01:00");
         assertFalse(service.receive("AUFHEBUNG_CCMC", revoke)); // Existing permission handling also receives it.
         var snapshot = service.communities(OPERATOR, CONNECTION).getFirst();
         assertEquals("CustomerRevocation", snapshot.revision());
+        assertEquals(originalConfirmation, snapshot.nativeParameters().path("masterDataReceivedAt").asText());
+        assertEquals("AnnualSnapshot", snapshot.nativeParameters().path("masterDataRevision").asText());
         var ended = snapshot.meteringPoints().stream().filter(point -> METER.equals(point.meteringPointId())).findFirst().orElseThrow();
         assertEquals("ENDED", ended.status());
         assertEquals(List.of("2026-01-01/2026-11-14"), periods(ended));
@@ -428,6 +432,8 @@ class EdaEnergySharingServiceTest {
         assertFalse(service.receive("AUFHEBUNG_CCMC", revoke));
         var current = service.communities(OPERATOR, CONNECTION).getFirst();
         assertEquals("AfterRevocationSnapshot", current.revision());
+        assertEquals("AfterRevocationSnapshot", current.nativeParameters().path("masterDataRevision").asText());
+        assertNotEquals(originalConfirmation, current.nativeParameters().path("masterDataReceivedAt").asText());
         assertEquals("CONFIRMED", current.meteringPoints().getFirst().status());
         assertEquals(75, current.meteringPoints().getFirst().participationFactor().intValueExact());
         assertEquals(List.of("2026-01-01/2026-12-31"), periods(current.meteringPoints().getFirst()));

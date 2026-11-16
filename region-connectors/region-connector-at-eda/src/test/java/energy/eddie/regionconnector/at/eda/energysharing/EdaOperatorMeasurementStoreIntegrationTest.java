@@ -137,4 +137,25 @@ class EdaOperatorMeasurementStoreIntegrationTest {
         assertEquals(2, results.getLast().sequence());
         assertTrue(results.getLast().sourceDocumentCreatedAt().isBefore(results.getFirst().sourceDocumentCreatedAt()));
     }
+    @Test void archiveValidationHasNoDatabaseWritesAndCommitRetainsOneImmutableDocument() {
+        var document = document("ARCHIVE");
+        byte[] source = bytes(xml("ARCHIVE"));
+        store.validateArchive("scope", "snapshot", "fingerprint", document, ignored -> MAPPER.readTree(roster()));
+        assertEquals(0L, jdbc.queryForObject("SELECT count(*) FROM at_eda.operator_measurement_cursor", Long.class));
+        assertEquals(0L, jdbc.queryForObject("SELECT count(*) FROM at_eda.operator_measurement_document", Long.class));
+        var first = store.append("scope", "snapshot", "fingerprint", document, source, ignored -> MAPPER.readTree(roster()));
+        var duplicate = store.append("scope", "snapshot", "fingerprint", document, source, ignored -> {
+            throw new IllegalStateException("Accepted proof must remain stable");
+        });
+        assertTrue(first.created());
+        assertFalse(duplicate.created());
+        assertEquals(first.document(), duplicate.document());
+        assertEquals(1, duplicate.document().sequence());
+        store.validateArchive("scope", "snapshot", "fingerprint", document, ignored -> {
+            throw new IllegalStateException("Accepted proof must remain stable");
+        });
+        assertEquals(1L, jdbc.queryForObject("SELECT count(*) FROM at_eda.operator_measurement_document", Long.class));
+        assertThrows(EnergySharingException.class, () -> store.validateArchive("scope", "snapshot", "different", document, ignored -> MAPPER.readTree(roster())));
+    }
+
 }

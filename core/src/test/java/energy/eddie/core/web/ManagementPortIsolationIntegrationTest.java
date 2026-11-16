@@ -66,6 +66,7 @@ class ManagementPortIsolationIntegrationTest {
 
             String[] managementPaths = {
                     "/management/energy-sharing/at-eda/communities/community/measurements",
+                    "/management/energy-sharing/at-eda/communities/community/measurement-documents/import",
                     "/management/energy-sharing/at-eda/communities/community/measurement-documents/doc/source",
                     "/management/energy-sharing/at-eda/operations",
                     "/%6danagement/energy-sharing/at-eda/operations",

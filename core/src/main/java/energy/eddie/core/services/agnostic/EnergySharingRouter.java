@@ -110,6 +110,25 @@ public class EnergySharingRouter {
         return service(regionConnectorId).measurementSource(operatorId, connectionId, communityId, documentId);
     }
 
+    public EnergySharingMeasurementImportResult importMeasurement(String regionConnectorId, String communityId,
+            String operatorId, String connectionId, EnergySharingMeasurementImport request) {
+        requireScope(operatorId, connectionId);
+        if (communityId.isBlank()) throw new EnergySharingException(INVALID_REQUEST, "A community is required");
+        var result = service(regionConnectorId).importMeasurement(operatorId, connectionId, communityId, request);
+        if (!operatorId.equals(result.operatorId()) || !connectionId.equals(result.connectionId())
+                || !communityId.equals(result.communityId()) || request.dryRun() != result.dryRun()
+                || !request.archiveId().equals(result.archiveId()) || !request.archivedAt().equals(result.archivedAt())
+                || !request.payloadSha256().equals(result.payloadSha256()) || !validImportOutcome(result))
+            throw new EnergySharingException(FORBIDDEN, "Archive import scope mismatch");
+        return result;
+    }
+
+    private static boolean validImportOutcome(EnergySharingMeasurementImportResult result) {
+        if (result.dryRun()) return "VALIDATED".equals(result.status()) && result.sequence() == 0;
+        return java.util.Set.of("IMPORTED", "ALREADY_PRESENT").contains(result.status())
+                && result.sequence() > 0 && !result.documentId().isBlank();
+    }
+
     private static void requireScope(String operatorId, String connectionId) {
         if (operatorId.isBlank() || connectionId.isBlank()) {
             throw new EnergySharingException(INVALID_REQUEST, "Operator and connection scope are required");

@@ -30,4 +30,11 @@ public interface RegionConnectorEnergySharingService {
         throw new EnergySharingException(EnergySharingException.Code.UNSUPPORTED,
                 "This connector does not provide original operator measurement documents");
     }
+    /** Optional recovery of original native operator documents; no outbound market action or customer-consent delivery. */
+    default EnergySharingMeasurementImportResult importMeasurement(String operatorId, String connectionId, String communityId,
+            EnergySharingMeasurementImport request) {
+        throw new EnergySharingException(EnergySharingException.Code.UNSUPPORTED,
+                "This connector does not support archived operator measurement import");
+    }
+
 }

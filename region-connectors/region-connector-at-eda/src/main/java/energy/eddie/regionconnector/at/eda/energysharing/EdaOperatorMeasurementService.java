@@ -67,6 +67,56 @@ public class EdaOperatorMeasurementService {
         }
     }
 
+    public EnergySharingMeasurementImportResult importArchive(String operatorId, String connectionId, String communityId,
+            EnergySharingMeasurementImport request) {
+        var binding = binding(operatorId, connectionId, communityId);
+        byte[] bytes = request.source();
+        if (!EdaOperatorMeasurementXml.hash(bytes).equals(request.payloadSha256()))
+            throw new EnergySharingException(INVALID_REQUEST, "Archive payload hash does not match the supplied original bytes");
+        Instant now = Instant.now();
+        var parsed = parser.parse(bytes, now);
+        if (!communityId.equals(parsed.communityId())) throw new EnergySharingException(FORBIDDEN, "Archived native community does not match import scope");
+        var document = archiveDocument(parsed.document(), request, now);
+        requireRouting(binding, communityId, document);
+        String scope = scope(binding, communityId);
+        if (request.dryRun()) {
+            store.validateArchive(scope, snapshotId(binding, communityId), parsed.fingerprint(), document,
+                    roster -> authorityProof(roster, binding, communityId, document));
+            return importResult(binding, communityId, document, request, "VALIDATED");
+        }
+        var stored = store.append(scope, snapshotId(binding, communityId), parsed.fingerprint(), document, bytes,
+                roster -> authorityProof(roster, binding, communityId, document));
+        if (!stored.document().rawPayloadSha256().equals(request.payloadSha256()))
+            throw new EnergySharingException(CONFLICT, "An accepted document already has different original bytes");
+        return importResult(binding, communityId, stored.document(), request, stored.created() ? "IMPORTED" : "ALREADY_PRESENT");
+    }
+
+    private EnergySharingMeasurementDocument archiveDocument(EnergySharingMeasurementDocument document,
+            EnergySharingMeasurementImport request, Instant now) {
+        if (request.archivedAt().isAfter(now) || request.archivedAt().isBefore(document.sourceDocumentCreatedAt().minusSeconds(300)))
+            throw new EnergySharingException(INVALID_REQUEST, "Archive receipt time is inconsistent with the native source creation time");
+        var metadata = (tools.jackson.databind.node.ObjectNode) document.nativeParameters();
+        var archive = mapper.createObjectNode();
+        archive.put("archiveId", request.archiveId());
+        archive.put("originalReceivedAt", request.archivedAt().toString());
+        archive.put("acceptedAt", now.toString());
+        archive.put("payloadSha256", request.payloadSha256());
+        archive.put("delivery", "AUTHENTICATED_ARCHIVE_IMPORT");
+        metadata.set("archiveImport", archive);
+        return new EnergySharingMeasurementDocument(document.sequence(), document.documentId(), document.sourceMessageId(),
+                document.sourceConversationId(), document.sourceSchemaVersion(), document.sourceDocumentCreatedAt(), now,
+                document.meteringPointId(), document.codingScheme(), document.senderId(), document.receiverId(),
+                document.rawPayloadSha256(), document.readings(), metadata);
+    }
+
+    private static EnergySharingMeasurementImportResult importResult(EdaEnergySharingConfiguration.Binding binding,
+            String communityId, EnergySharingMeasurementDocument document, EnergySharingMeasurementImport request, String status) {
+        return new EnergySharingMeasurementImportResult("AT", binding.connectionId(), binding.operatorId(), communityId,
+                document.documentId(), document.sourceMessageId(), document.sourceDocumentCreatedAt(), document.receivedAt(),
+                document.sequence(), document.readings().size(), document.rawPayloadSha256(), status, request.dryRun(),
+                request.archiveId(), request.archivedAt());
+    }
+
     public EnergySharingMeasurementPage measurements(String operatorId, String connectionId, String communityId,
                                                      long afterSequence, int limit) {
         if (afterSequence < 0 || limit < 1 || limit > 100) throw new EnergySharingException(INVALID_REQUEST, "Invalid measurement cursor or page limit");

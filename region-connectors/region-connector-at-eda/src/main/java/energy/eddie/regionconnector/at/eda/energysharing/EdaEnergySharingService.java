@@ -443,6 +443,13 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
   }
 
   @Override
+  public EnergySharingMeasurementImportResult importMeasurement(String operatorId, String connectionId, String communityId,
+      EnergySharingMeasurementImport request) {
+    return Objects.requireNonNull(operatorMeasurements, "Operator measurement service unavailable")
+        .importArchive(operatorId, connectionId, communityId, request);
+  }
+
+  @Override
   public byte[] measurementSource(String operatorId, String connectionId, String communityId, String documentId) {
     return Objects.requireNonNull(operatorMeasurements, "Operator measurement service unavailable")
         .source(operatorId, connectionId, communityId, documentId);
@@ -661,6 +668,8 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
     for (var member : children(pd, "MPListData")) meters.add(readMeter(member, dso));
     var nativeParams = mapper.createObjectNode();
     nativeParams.put(COUNTRY_CODE_FIELD, "AT");
+    nativeParams.put("masterDataReceivedAt", clock.instant().toString());
+    nativeParams.put("masterDataRevision", revision);
     nativeParams.put("communityType", textOrEmpty(pd, "ECType"));
     nativeParams.put("zoneLevel", textOrEmpty(pd, "ECZoneLevel"));
     nativeParams.put("nativeXml", new String(xml, StandardCharsets.UTF_8));

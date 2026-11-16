@@ -43,3 +43,24 @@ The regional adapter validates sender, recipient, conversation, community and me
 6. Test the connector with its market partners before advertising production readiness. Unsupported operations remain unavailable.
 
 The Austrian profile and current EDA limitations are documented in the connector implementation and in the Energy Sharing Reference Model. No generic API endpoint itself provisions an XP Messenger partner, grants customer consent or executes financial settlement.
+
+## Controlled recovery of archived native operator measurements
+
+An optional `importMeasurement` SPI supports recovery of original operator documents without retransmitting a market message or delivering anything into a customer-consent stream. Other connectors default to `UNSUPPORTED`. The Austrian implementation reuses the pinned CR_MSG 01.41 parser and the existing append-only measurement ledger. No schema migration is required.
+
+`POST /{region}/communities/{communityId}/measurement-documents/import?operatorId=…&connectionId=…&dryRun=true` accepts `application/xml` and at most 16 MiB. `dryRun` defaults to **true**. Headers are `Authorization: Bearer …`, `X-Archive-Id`, `X-Archive-Received-At` (original archive receipt time), and `X-Archive-Payload-Sha256` (lowercase SHA-256 of the exact bytes). Only explicit `dryRun=false` can append a document. Validation does not reserve a cursor or modify the ledger. A successful dry run is not a guarantee of future authorization; import revalidates under the database lock.
+
+The route has two independent boundaries: the existing management-port isolation and a separate import-only authorization gate. Ordinary management access, a portal token, a worker token, or an archive ID alone does not authorize import. Configuration under `eddie.management.energy-sharing.import` contains:
+
+- `enabled`: false by default;
+- `token-sha256`: SHA-256 of a dedicated high-entropy bearer credential, never the credential itself;
+- `expires-at`: required future expiry instant;
+- `scopes`: exact tuples of `region-connector-id`, `operator-id`, `connection-id`, and `community-id`.
+
+The credential is compared in constant time and is never included in responses. Provision and transport it privately; do not put a bearer token in command arguments, shell history, source, public logs or documentation. A reviewed recovery run must bind the exact DEV host/namespace, source image, private management port, archive manifest and payload hashes before enabling the temporary credential. Do not expose this endpoint through public ingress. Disable the gate after recovery; expiry also fails closed.
+
+The authenticated recovery caller attests the provenance of the retained transport archive. The archive ID is descriptive evidence, not proof of a market mandate or a substitute for the original transport evidence. Independently, the connector checks the currently configured operator/connection/community binding, native EC-ID, sender and receiver, one unambiguous qualified metering point and confirmed membership coverage of **every** reading. No routing rule, XP partner, agreement, consent or membership is created. A missing historical authority period must be resolved through an appropriately scoped authoritative master-data response before recovery, not guessed from today's membership.
+
+The submitted SHA must match the exact native bytes. Source creation time, native message ID, schema, values and raw XML remain intact. The ledger's `receivedAt` truthfully denotes receipt by this import; `nativeParameters.archiveImport` separately records `archiveId`, `originalReceivedAt`, `acceptedAt`, payload hash and `AUTHENTICATED_ARCHIVE_IMPORT`. The stored authority proof and sequence are committed together. Same-scope native message ID and fingerprint are idempotent; changed original bytes for an already accepted archive are a conflict and do not overwrite the original. Repeated accepted records retain their original receipt and proof even when a later rolling roster window no longer covers that historical day.
+
+Receipts report `VALIDATED` (no insert), `IMPORTED` or `ALREADY_PRESENT`, the exact scope, native identity, source/receipt times, reading count and payload hash. Actual imports have a durable positive sequence and document ID. Existing scoped feed consumers then receive these documents normally. A response timeout is reconciled using the same immutable archive bytes and identity; never fabricate replacement native IDs or rewrite source timestamps to force an import.

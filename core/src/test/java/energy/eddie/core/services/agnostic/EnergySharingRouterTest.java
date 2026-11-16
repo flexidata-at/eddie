@@ -25,6 +25,24 @@ class EnergySharingRouterTest {
         when(service.capabilities("operator", "connection")).thenReturn(capabilities("1", true));
     }
 
+    @Test void importIsScopedAndDoesNotAcceptAnotherArchiveReceiptOrUnconfirmedCommit() {
+        var request = new EnergySharingMeasurementImport(new byte[]{1}, "ponton:123", Instant.EPOCH, "a".repeat(64), true);
+        var valid = new EnergySharingMeasurementImportResult("XX", "connection", "operator", "community", "", "native", Instant.EPOCH,
+                Instant.EPOCH, 0, 1, request.payloadSha256(), "VALIDATED", true, request.archiveId(), request.archivedAt());
+        when(service.importMeasurement("operator", "connection", "community", request)).thenReturn(valid);
+        assertSame(valid, router.importMeasurement("future-country", "community", "operator", "connection", request));
+        var foreign = new EnergySharingMeasurementImportResult("XX", "foreign", "operator", "community", "", "native", Instant.EPOCH,
+                Instant.EPOCH, 0, 1, request.payloadSha256(), "VALIDATED", true, request.archiveId(), request.archivedAt());
+        when(service.importMeasurement("operator", "connection", "community", request)).thenReturn(foreign);
+        assertThrows(EnergySharingException.class, () -> router.importMeasurement("future-country", "community", "operator", "connection", request));
+        assertThrows(EnergySharingException.class, () -> router.importMeasurement("future-country", "", "operator", "connection", request));
+        var commit = new EnergySharingMeasurementImport(new byte[]{1}, "ponton:123", Instant.EPOCH, request.payloadSha256(), false);
+        var uncommitted = new EnergySharingMeasurementImportResult("XX", "connection", "operator", "community", "", "native", Instant.EPOCH,
+                Instant.EPOCH, 0, 1, request.payloadSha256(), "IMPORTED", false, request.archiveId(), request.archivedAt());
+        when(service.importMeasurement("operator", "connection", "community", commit)).thenReturn(uncommitted);
+        assertThrows(EnergySharingException.class, () -> router.importMeasurement("future-country", "community", "operator", "connection", commit));
+    }
+
     @Test
     void measurementsRequireExactReturnedScopeAndValidBounds() {
         var page = new EnergySharingMeasurementPage("XX", "connection", "operator", "community", 5, 7, false, List.of());

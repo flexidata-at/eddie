@@ -44,5 +44,26 @@ class EnergySharingMeasurementTest {
         var exception = assertThrows(EnergySharingException.class, () -> unsupported.measurements("operator", "connection", "community", 0, 20));
         assertEquals(EnergySharingException.Code.UNSUPPORTED, exception.code());
         assertThrows(EnergySharingException.class, () -> unsupported.measurementSource("operator", "connection", "community", "doc"));
+        var request = new EnergySharingMeasurementImport(new byte[]{1}, "archive:1", Instant.EPOCH, "a".repeat(64), true);
+        assertThrows(EnergySharingException.class, () -> unsupported.importMeasurement("operator", "connection", "community", request));
     }
+    @Test void archivedNativeBytesAreDefensiveAndBounded() {
+        byte[] bytes = {1, 2};
+        String hash = "a".repeat(64);
+        var request = new EnergySharingMeasurementImport(bytes, "ponton:123", Instant.EPOCH, hash, true);
+        bytes[0] = 9;
+        request.source()[1] = 9;
+        assertArrayEquals(new byte[]{1, 2}, request.source());
+        assertEquals("ponton:123", request.archiveId());
+        assertEquals(Instant.EPOCH, request.archivedAt());
+        assertEquals(hash, request.payloadSha256());
+        assertTrue(request.dryRun());
+        byte[] empty = {};
+        byte[] oversized = new byte[EnergySharingMeasurementImport.MAX_BYTES + 1];
+        assertThrows(EnergySharingException.class, () -> new EnergySharingMeasurementImport(empty, "a", Instant.EPOCH, hash, true));
+        assertThrows(EnergySharingException.class, () -> new EnergySharingMeasurementImport(oversized, "a", Instant.EPOCH, hash, true));
+        assertThrows(EnergySharingException.class, () -> new EnergySharingMeasurementImport(bytes, "../unsafe", Instant.EPOCH, hash, true));
+        assertThrows(EnergySharingException.class, () -> new EnergySharingMeasurementImport(bytes, "a", Instant.EPOCH, "bad", true));
+    }
+
 }
