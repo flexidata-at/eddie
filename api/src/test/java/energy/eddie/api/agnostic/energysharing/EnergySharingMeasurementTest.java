@@ -66,4 +66,23 @@ class EnergySharingMeasurementTest {
         assertThrows(EnergySharingException.class, () -> new EnergySharingMeasurementImport(bytes, "a", Instant.EPOCH, "bad", true));
     }
 
+    @Test void importRecordHasByteValueSemanticsWithoutLoggingNativeBytesOrArchiveIdentity() {
+        byte[] source = "<synthetic-native/>".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String hash = "a".repeat(64);
+        var original = new EnergySharingMeasurementImport(source, "ponton:123", Instant.EPOCH, hash, true);
+        var identical = new EnergySharingMeasurementImport(source.clone(), "ponton:123", Instant.EPOCH, hash, true);
+        assertEquals(original, identical);
+        assertEquals(original.hashCode(), identical.hashCode());
+        assertNotEquals(original, null);
+        assertNotEquals(original, "other type");
+        assertNotEquals(original, new EnergySharingMeasurementImport(new byte[]{1}, "ponton:123", Instant.EPOCH, hash, true));
+        assertNotEquals(original, new EnergySharingMeasurementImport(source, "ponton:124", Instant.EPOCH, hash, true));
+        assertNotEquals(original, new EnergySharingMeasurementImport(source, "ponton:123", Instant.EPOCH.plusSeconds(1), hash, true));
+        assertNotEquals(original, new EnergySharingMeasurementImport(source, "ponton:123", Instant.EPOCH, "b".repeat(64), true));
+        assertNotEquals(original, new EnergySharingMeasurementImport(source, "ponton:123", Instant.EPOCH, hash, false));
+        assertFalse(original.toString().contains("synthetic-native"));
+        assertFalse(original.toString().contains("ponton:123"));
+        assertTrue(original.toString().contains("sourceBytes=" + source.length));
+    }
+
 }

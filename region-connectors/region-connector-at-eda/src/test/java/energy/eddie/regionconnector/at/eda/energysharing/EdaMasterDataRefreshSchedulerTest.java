@@ -149,7 +149,7 @@ class EdaMasterDataRefreshSchedulerTest {
     assertEquals(request, state.get().request());
     assertEquals(2, state.get().failures());
     assertEquals(clock.instant().plusSeconds(600), state.get().nextAttemptAt());
-    verify(service, times(2)).submit(eq(request));
+    verify(service, times(2)).submit(request);
   }
 
   @Test

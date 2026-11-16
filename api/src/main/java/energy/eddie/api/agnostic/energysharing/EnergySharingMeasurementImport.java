@@ -6,16 +6,11 @@ import java.time.Instant;
 import java.util.Objects;
 
 /** Exact archived native bytes. Archive metadata is provenance, never an authorization selector. */
-public final class EnergySharingMeasurementImport {
+public record EnergySharingMeasurementImport(
+    byte[] source, String archiveId, Instant archivedAt, String payloadSha256, boolean dryRun) {
   public static final int MAX_BYTES = 16 * 1024 * 1024;
-  private final byte[] source;
-  private final String archiveId;
-  private final Instant archivedAt;
-  private final String payloadSha256;
-  private final boolean dryRun;
 
-  public EnergySharingMeasurementImport(
-      byte[] source, String archiveId, Instant archivedAt, String payloadSha256, boolean dryRun) {
+  public EnergySharingMeasurementImport {
     if (source.length == 0
         || source.length > MAX_BYTES
         || !archiveId.matches("[A-Za-z0-9_.:-]{1,200}")
@@ -23,30 +18,41 @@ public final class EnergySharingMeasurementImport {
       throw new EnergySharingException(
           EnergySharingException.Code.INVALID_REQUEST,
           "Invalid bounded archive document or identity");
-    this.source = source.clone();
-    this.archiveId = archiveId;
-    this.archivedAt = Objects.requireNonNull(archivedAt);
-    this.payloadSha256 = payloadSha256;
-    this.dryRun = dryRun;
+    source = source.clone();
+    Objects.requireNonNull(archivedAt);
   }
 
+  @Override
   public byte[] source() {
     return source.clone();
   }
 
-  public String archiveId() {
-    return archiveId;
+  @Override
+  public boolean equals(Object other) {
+    return other
+            instanceof
+            EnergySharingMeasurementImport(
+                var otherSource,
+                var otherArchiveId,
+                var otherArchivedAt,
+                var otherHash,
+                var otherDryRun)
+        && java.util.Arrays.equals(source, otherSource)
+        && archiveId.equals(otherArchiveId)
+        && archivedAt.equals(otherArchivedAt)
+        && payloadSha256.equals(otherHash)
+        && dryRun == otherDryRun;
   }
 
-  public Instant archivedAt() {
-    return archivedAt;
+  @Override
+  public int hashCode() {
+    return Objects.hash(
+        java.util.Arrays.hashCode(source), archiveId, archivedAt, payloadSha256, dryRun);
   }
 
-  public String payloadSha256() {
-    return payloadSha256;
-  }
-
-  public boolean dryRun() {
-    return dryRun;
+  @Override
+  public String toString() {
+    return "EnergySharingMeasurementImport[sourceBytes=%d, dryRun=%s]"
+        .formatted(source.length, dryRun);
   }
 }
