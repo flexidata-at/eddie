@@ -68,6 +68,76 @@ class EdaEnergySharingServiceTest {
     }
 
     @Test
+    void officialDataRequestIsScopedDurableAndAckDoesNotClaimDataCoverage() throws Exception {
+        var query = service.submit(request("roster", "SYNC_MASTER_DATA", mapper.createObjectNode()));
+        var period = period("2026-01-01", "2026-12-31", 100).replace("<cp:DateActivate>", "<cp:TransmissionCycle>D</cp:TransmissionCycle><cp:DateActivate>");
+        service.receive("SENDEN_ECP", list(query.marketMessageId(), "MasterBeforeRequest", "SENDEN_ECP", member(METER, period), DSO));
+        var measurements = mock(EdaOperatorMeasurementService.class);
+        when(measurements.requestDelivery(eq(OPERATOR), eq(CONNECTION), eq(EC), anyString(), eq(METER)))
+                .thenReturn(new EdaOperatorMeasurementStore.Delivery(0, 0));
+        service.setOperatorMeasurements(measurements);
+        doAnswer(call -> {
+            EnergySharingRecord entry = call.getArgument(0);
+            var snapshot = records.get(call.getArgument(1));
+            UnaryOperator<String> authorize = call.getArgument(2);
+            entry.payload(authorize.apply(snapshot.payload()));
+            records.put(entry.id(), entry);
+            return null;
+        }).when(store).insertAuthorized(any(), anyString(), any());
+        var command = request("missing-data", "REQUEST_MEASUREMENTS", mapper.createObjectNode()
+                .put("meteringPointId", METER).put("start", "2026-10-01").put("end", "2026-10-31"));
+        clearInvocations(transport);
+        var submitted = service.submit(command);
+        assertEquals("SUBMITTED", submitted.status());
+        service.submit(command);
+        verify(transport, times(1)).sendEnergySharing(any());
+        var captured = ArgumentCaptor.forClass(OutboundMessage.class);
+        verify(transport).sendEnergySharing(captured.capture());
+        var outbound = captured.getValue().getInputStream().readAllBytes();
+        EdaEnergySharingXml.validate(outbound, "CPRequest_01p12.xsd");
+        assertTrue(new String(outbound, StandardCharsets.UTF_8).contains("ANFORDERUNG_PT"));
+        var wrongReference = processNotification(submitted.marketMessageId(), "WrongOriginal", "ANTWORT_PT", 70);
+        wrongReference = new String(wrongReference, StandardCharsets.UTF_8).replace("<cp:OriginalMessageID>" + submitted.marketMessageId(), "<cp:OriginalMessageID>WrongId").getBytes(StandardCharsets.UTF_8);
+        byte[] invalidReference = wrongReference;
+        assertThrows(EnergySharingException.class, () -> service.receive("ANTWORT_PT", invalidReference));
+        byte[] invalidCode = processNotification(submitted.marketMessageId(), "WrongCode", "ANTWORT_PT", 94);
+        assertThrows(EnergySharingException.class, () -> service.receive("ANTWORT_PT", invalidCode));
+        byte[] accepted = processNotification(submitted.marketMessageId(), "AcceptedRequest", "ANTWORT_PT", 70);
+        assertTrue(service.receive("ANTWORT_PT", accepted));
+        assertTrue(service.receive("ANTWORT_PT", accepted));
+        var status = service.operation("missing-data", CONNECTION, OPERATOR, EC).orElseThrow();
+        assertEquals("ACKNOWLEDGED", status.status());
+        assertEquals("REQUEST_ACCEPTED", status.result().path("stage").asText());
+        assertEquals("NO_MATCHING_DOCUMENTS", status.result().path("deliveryStatus").asText());
+        assertFalse(status.result().path("coverageComplete").asBoolean());
+        when(measurements.requestDelivery(OPERATOR, CONNECTION, EC, submitted.marketMessageId(), METER))
+                .thenReturn(new EdaOperatorMeasurementStore.Delivery(2, 192));
+        var delivered = service.operation("missing-data", CONNECTION, OPERATOR, EC).orElseThrow();
+        assertEquals("ACKNOWLEDGED", delivered.status());
+        assertEquals("DOCUMENTS_RECEIVED", delivered.result().path("deliveryStatus").asText());
+        assertEquals(2, delivered.result().path("receivedDocumentCount").asInt());
+        assertFalse(delivered.result().path("coverageComplete").asBoolean());
+        assertTrue(service.receive("ABLEHNUNG_PT", processNotification(submitted.marketMessageId(), "NoData", "ABLEHNUNG_PT", 94)));
+        assertEquals("REJECTED", service.operation("missing-data", CONNECTION, OPERATOR, EC).orElseThrow().status());
+        verify(transport, times(1)).sendEnergySharing(any()); // No follow-up market query on acknowledgement/read.
+        var stored = records.values().stream().filter(row -> row.marketId().equals(submitted.marketMessageId())).findFirst().orElseThrow();
+        assertEquals(METER, mapper.readTree(stored.payload()).path("authorityEvidence").path("meteringPointId").asText());
+    }
+
+    @Test
+    void dataRequestWithoutRosterOrWithUnknownParameterNeverSends() throws Exception {
+        var command = request("no-roster", "REQUEST_MEASUREMENTS", mapper.createObjectNode()
+                .put("meteringPointId", METER).put("start", "2026-10-01").put("end", "2026-10-31"));
+        assertEquals(EnergySharingException.Code.NOT_READY, assertThrows(EnergySharingException.class, () -> service.submit(command)).code());
+        var unknown = request("unknown", "REQUEST_MEASUREMENTS", mapper.createObjectNode()
+                .put("meteringPointId", METER).put("start", "2026-10-01").put("end", "2026-10-31").put("consentId", "untrusted"));
+        assertThrows(EnergySharingException.class, () -> service.submit(unknown));
+        assertFalse(service.receive("ANTWORT_PT", processNotification("UnrelatedCESU", "Legacy", "ANTWORT_PT", 70)));
+        verify(transport, never()).sendEnergySharing(any());
+        assertTrue(records.isEmpty());
+    }
+
+    @Test
     void scopeAndParameterErrorsNeverReachTransport() throws Exception {
         var foreign = new EnergySharingRequest("foreign", "another-application", OPERATOR, EC,
                 "SYNC_MASTER_DATA", EdaEnergySharingXml.VERSION, mapper.createObjectNode());

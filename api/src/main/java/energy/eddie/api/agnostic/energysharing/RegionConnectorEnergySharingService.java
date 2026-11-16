@@ -15,6 +15,12 @@ import java.util.Optional;
  */
 public interface RegionConnectorEnergySharingService {
     EnergySharingCapabilities capabilities(String operatorId, String connectionId);
+    /**
+     * Advertised REQUEST_MEASUREMENTS requests missing operator data through the national process.
+     * Its parameters and permitted dates come from capabilities, never a caller-provided mandate.
+     * ACKNOWLEDGED means request acceptance only; correlated document receipt is separate evidence,
+     * not a guarantee of complete coverage. No connector may dispatch it automatically on a read.
+     */
     EnergySharingOperation submit(EnergySharingRequest request);
     Optional<EnergySharingOperation> operation(String requestId, String connectionId, String operatorId, String communityId);
     List<EnergySharingCommunitySnapshot> communities(String operatorId, String connectionId);

@@ -126,6 +126,12 @@ public class EdaOperatorMeasurementService {
                 page.nextSequence(), page.hasMore(), page.documents());
     }
 
+    public EdaOperatorMeasurementStore.Delivery requestDelivery(String operatorId, String connectionId, String communityId,
+            String conversationId, String meteringPointId) {
+        var binding = binding(operatorId, connectionId, communityId);
+        return store.requestDelivery(scope(binding, communityId), conversationId, meteringPointId);
+    }
+
     public byte[] source(String operatorId, String connectionId, String communityId, String documentId) {
         var binding = binding(operatorId, connectionId, communityId);
         if (!documentId.matches("[0-9a-f]{64}")) throw new EnergySharingException(NOT_FOUND, "Measurement source not found");

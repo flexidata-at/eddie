@@ -501,5 +501,42 @@
       }
     },
     "description": "Send between 09:00 and 17:00 Europe/Vienna for the next calendar day. Include all future scheduled changes; one change per meter/community/day."
+  },
+  "REQUEST_MEASUREMENTS": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "meteringPointId",
+      "start",
+      "end"
+    ],
+    "description": "Explicit official CR_REQ_PT04.30 request for missing operator energy data. Inclusive Vienna dates, at most three years back and within confirmed membership. Daily delivery: wait three market working days after expected next-day receipt; monthly: until the sixth of the following month. Request acceptance does not prove complete data delivery. If native transmission cycle is missing/variable, the later of both waiting dates applies conservatively.",
+    "properties": {
+      "meteringPointId": {
+        "type": "string",
+        "title": "Metering point",
+        "pattern": "^[A-Za-z0-9]{1,33}$"
+      },
+      "start": {
+        "type": "string",
+        "title": "First requested day (inclusive)",
+        "format": "date"
+      },
+      "end": {
+        "type": "string",
+        "title": "Last requested day (inclusive)",
+        "format": "date"
+      },
+      "meteringInterval": {
+        "type": "string",
+        "title": "Requested metering interval (optional)",
+        "enum": [
+          "QH",
+          "H",
+          "D",
+          "V"
+        ]
+      }
+    }
   }
 }

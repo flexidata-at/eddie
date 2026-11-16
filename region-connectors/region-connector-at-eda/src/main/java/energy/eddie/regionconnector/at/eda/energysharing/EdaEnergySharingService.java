@@ -29,6 +29,9 @@ import tools.jackson.databind.node.*;
 @Component
 public class EdaEnergySharingService implements RegionConnectorEnergySharingService {
   private static final String OPERATOR_MEASUREMENT_UNAVAILABLE = "Operator measurement service unavailable";
+  private static final String METERING_POINT_ID_FIELD = "meteringPointId";
+  private static final String ANTWORT_PT = "ANTWORT_PT";
+  private static final String REQUEST_MEASUREMENTS = "REQUEST_MEASUREMENTS";
   private static final String SYNC_MASTER_DATA = "SYNC_MASTER_DATA";
   private static final String LEAVE = "LEAVE";
   private static final String CHANGE_PARTICIPATION_FACTOR = "CHANGE_PARTICIPATION_FACTOR";
@@ -66,7 +69,7 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
   private static final String DEFAULT_FIELD = "default";
 
   private static final Set<String> OPERATIONS =
-      Set.of("JOIN", LEAVE, CHANGE_PARTICIPATION_FACTOR, CHANGE_ALLOCATION, SYNC_MASTER_DATA);
+      Set.of("JOIN", LEAVE, CHANGE_PARTICIPATION_FACTOR, CHANGE_ALLOCATION, SYNC_MASTER_DATA, REQUEST_MEASUREMENTS);
   private static final Set<String> TERMINAL = Set.of(COMPLETED, REJECTED);
   private final EdaEnergySharingConfiguration config;
   private final EdaEnergySharingStore store;
@@ -155,7 +158,7 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
               + " certificates/agreement in PONTON X/P.");
       steps.add(
           "Activate EC_REQ_ONL_02.40, EC_PODLIST_02.10, EC_PRTFACT_CHANGE_01.10,"
-              + " EC_PRT_CHANGE_02.10 and CM_REV_SP_01.30 as applicable.");
+              + " EC_PRT_CHANGE_02.10, CM_REV_SP_01.30 and CR_REQ_PT_03.00 as applicable.");
       steps.add(
           "Configure the EDDIE adapter, verify its connection-to-operator authorization, then test"
               + " transport and synchronize master data.");
@@ -213,14 +216,14 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
     data.set(OPERATION_FIELD, mapper.valueToTree(operation));
     data.putArray(EVENTS_FIELD);
     try {
-      store.insert(
-          new EnergySharingRecord(
-              id,
-              scope(request.operatorId(), request.connectionId()),
-              "OPERATION",
-              fingerprint,
-              marketId,
-              data.toString()));
+      var entry = new EnergySharingRecord(id, scope(request.operatorId(), request.connectionId()),
+          "OPERATION", fingerprint, marketId, data.toString());
+      if (REQUEST_MEASUREMENTS.equals(request.operation())) {
+        store.insertAuthorized(entry, snapshotKey(request), snapshot -> {
+          data.set("authorityEvidence", measurementRequestProof(request, dso, snapshot));
+          return data.toString();
+        });
+      } else store.insert(entry);
     } catch (RuntimeException e) {
       var race = store.find(id);
       if (race.isPresent()) return replay(race.get(), fingerprint);
@@ -257,6 +260,10 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
   }
 
   private void validateCommunityRequest(EnergySharingRequest request, String dso) {
+    if (REQUEST_MEASUREMENTS.equals(request.operation())) {
+      var snapshot = store.find(snapshotKey(request)).orElseThrow(() -> error(NOT_READY, "Synchronize authoritative community membership first"));
+      measurementRequestProof(request, dso, snapshot.payload());
+    }
     if (request.parameters().hasNonNull("permissionAdministratorId")
         && !dso.equals(request.parameters().path("permissionAdministratorId").asText()))
       throw error(FORBIDDEN, "DSO does not match the authorized community binding");
@@ -275,6 +282,10 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
             INVALID_REQUEST,
             "A confirmed existing static community snapshot is required for ECShare");
     }
+  }
+
+  private JsonNode measurementRequestProof(EnergySharingRequest request, String dso, String snapshot) {
+    return new EdaMeasurementRequestPolicy(mapper, clock).authorize(request, dso, snapshot);
   }
 
   private void dispatch(
@@ -399,7 +410,23 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
     if (!communityId.isBlank()) community(binding, communityId);
     return store
         .find(key(operatorId, connectionId, communityId, requestId))
-        .map(row -> aggregateOperation(readOperation(row.payload()), connectionId, operatorId));
+        .map(row -> measurementRequestStatus(row, aggregateOperation(readOperation(row.payload()), connectionId, operatorId)));
+  }
+
+  private EnergySharingOperation measurementRequestStatus(EnergySharingRecord row, EnergySharingOperation operation) {
+    if (!REQUEST_MEASUREMENTS.equals(operation.operation())) return operation;
+    var request = mapper.treeToValue(mapper.readTree(row.payload()).path(REQUEST_FIELD), EnergySharingRequest.class);
+    var delivery = Objects.requireNonNull(operatorMeasurements, OPERATOR_MEASUREMENT_UNAVAILABLE)
+        .requestDelivery(request.operatorId(), request.connectionId(), request.communityId(),
+            Objects.requireNonNull(operation.marketMessageId()), request.parameters().path(METERING_POINT_ID_FIELD).asText());
+    var result = (ObjectNode) operation.result().deepCopy();
+    result.put("deliveryStatus", delivery.documentCount() == 0 ? "NO_MATCHING_DOCUMENTS" : "DOCUMENTS_RECEIVED");
+    result.put("receivedDocumentCount", delivery.documentCount());
+    result.put("receivedReadingCount", delivery.readingCount());
+    result.put("coverageComplete", false);
+    return new EnergySharingOperation(operation.requestId(), operation.connectionId(), operation.operatorId(), operation.communityId(),
+        operation.operation(), operation.status(), operation.createdAt(), operation.updatedAt(), operation.marketMessageId(),
+        operation.nativeCode(), operation.message(), result);
   }
 
   private EnergySharingOperation aggregateOperation(
@@ -487,7 +514,7 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
             "SENDEN_ECP",
             "ABLEHNUNG_ECP",
             "ANTWORT_CCMS",
-            "ABLEHNUNG_CCMS")
+            "ABLEHNUNG_CCMS", ANTWORT_PT, "ABLEHNUNG_PT")
         .contains(messageCode)) return false;
     var root = EdaEnergySharingXml.parse(xml).getDocumentElement();
     String schema =
@@ -532,7 +559,8 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
       throw error(FORBIDDEN, "Market reply community mismatch");
     if (!allowedReply(req.operation(), reply.code()))
       throw error(INVALID_REQUEST, "Reply does not belong to this operation");
-    var expectedMeter = req.parameters().path("meteringPointId").asText("");
+    if (REQUEST_MEASUREMENTS.equals(req.operation())) EdaMeasurementRequestPolicy.validateReply(reply.code(), reply.directory(), reply.storedRow().marketId());
+    var expectedMeter = req.parameters().path(METERING_POINT_ID_FIELD).asText("");
     for (var meter : descendants(reply.directory(), METERING_POINT)) {
       if (!expectedMeter.isEmpty() && !expectedMeter.equals(meter.getTextContent()))
         throw error(FORBIDDEN, "Market reply meter mismatch");
@@ -558,6 +586,10 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
     result.put("messageCode", reply.code());
     result.put("nativeXml", new String(xml, StandardCharsets.UTF_8));
     result.put(COUNTRY_CODE_FIELD, "AT");
+    if (REQUEST_MEASUREMENTS.equals(reply.request().operation())) {
+      result.put("stage", ANTWORT_PT.equals(reply.code()) ? "REQUEST_ACCEPTED" : "REQUEST_REJECTED");
+      result.put("coverageComplete", false);
+    }
     if ("CMNotification".equals(reply.root().getLocalName()))
       addConsentResult(reply.directory(), result);
     return result;
@@ -594,7 +626,7 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
 
   private static String replyState(String code) {
     if (code.startsWith("ABLEHNUNG") || code.equals("ABBRUCH_ECON")) return REJECTED;
-    if (code.equals("ZUSTIMMUNG_ECON") || code.equals(ANTWORT_ECON)) return ACKNOWLEDGED;
+    if (code.equals("ZUSTIMMUNG_ECON") || code.equals(ANTWORT_ECON) || code.equals(ANTWORT_PT)) return ACKNOWLEDGED;
     return COMPLETED;
   }
 
@@ -1017,6 +1049,7 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
       case CHANGE_PARTICIPATION_FACTOR -> code.endsWith("_CPF");
       case CHANGE_ALLOCATION -> code.endsWith("_ECC");
       case SYNC_MASTER_DATA -> code.endsWith("_ECP");
+      case REQUEST_MEASUREMENTS -> code.equals(ANTWORT_PT) || code.equals("ABLEHNUNG_PT");
       default -> false;
     };
   }
@@ -1117,7 +1150,7 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
             "DAILY:"
                 + request.operation()
                 + ":"
-                + request.parameters().path("meteringPointId").asText()
+                + request.parameters().path(METERING_POINT_ID_FIELD).asText()
                 + ":"
                 + day);
     var old = store.find(id);

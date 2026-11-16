@@ -73,8 +73,9 @@ class EnergySharingMeasurementTest {
         var identical = new EnergySharingMeasurementImport(source.clone(), "ponton:123", Instant.EPOCH, hash, true);
         assertEquals(original, identical);
         assertEquals(original.hashCode(), identical.hashCode());
-        assertNotEquals(original, null);
-        assertNotEquals(original, "other type");
+        assertFalse(original.equals(null));
+        Object incompatible = "other type";
+        assertFalse(original.equals(incompatible));
         assertNotEquals(original, new EnergySharingMeasurementImport(new byte[]{1}, "ponton:123", Instant.EPOCH, hash, true));
         assertNotEquals(original, new EnergySharingMeasurementImport(source, "ponton:124", Instant.EPOCH, hash, true));
         assertNotEquals(original, new EnergySharingMeasurementImport(source, "ponton:123", Instant.EPOCH.plusSeconds(1), hash, true));

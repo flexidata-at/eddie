@@ -143,6 +143,8 @@ public final class EdaEnergySharingXml {
                     "customerprocesses/ecmplist/01p20", "01.20");
             case CHANGE_ALLOCATION -> wire("ANFORDERUNG_ECC", "EC_PRT_CHANGE_02.10", EC_MP_LIST,
                     "customerprocesses/ecmplist/01p20", "01.20");
+            case "REQUEST_MEASUREMENTS" -> wire("ANFORDERUNG_PT", "CR_REQ_PT_03.00", CP_REQUEST,
+                    "customerprocesses/cprequest/01p12", "01.12");
             case "SYNC_MASTER_DATA" -> wire("ANFORDERUNG_ECP", "EC_PODLIST_02.10", CP_REQUEST,
                     "customerprocesses/cprequest/01p12", "01.12");
             default -> throw invalid("Unsupported EDA operation");
@@ -181,6 +183,7 @@ public final class EdaEnergySharingXml {
         switch (request.operation()) {
             case "JOIN" -> addJoin(directory, profile.namespace(), request, id, today);
             case "LEAVE" -> addLeave(directory, profile.namespace(), request.parameters(), today);
+            case "REQUEST_MEASUREMENTS" -> addMeasurementRequest(directory, profile.namespace(), request, today);
             case "SYNC_MASTER_DATA" -> addQuery(directory, profile.namespace(), request, today);
             default -> addFactorChange(directory, profile.namespace(), request, today, clock);
         }
@@ -249,6 +252,18 @@ public final class EdaEnergySharingXml {
         }
         child(extension, namespace, "DateTimeFrom", start.atStartOfDay(VIENNA).toOffsetDateTime().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
         child(extension, namespace, "DateTimeTo", end.plusDays(1).atStartOfDay(VIENNA).toOffsetDateTime().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+        child(extension, namespace, "AssumptionOfCosts", "false");
+    }
+
+    private static void addMeasurementRequest(Element directory, String namespace, EnergySharingRequest request, LocalDate today) {
+        var parameters = request.parameters();
+        EdaMeasurementRequestPolicy.validateDates(parameters, today);
+        child(directory, CT, "ct:ProcessDate", today.toString());
+        child(directory, CT, "ct:MeteringPoint", identifier(parameters, METERING_POINT_ID, 33));
+        var extension = child(directory, namespace, "Extension", null);
+        optionalEnum(extension, namespace, parameters, "meteringInterval", "MeteringIntervall", Set.of("QH", "H", "D", "V"));
+        child(extension, namespace, "DateTimeFrom", date(parameters, START).atStartOfDay(VIENNA).toOffsetDateTime().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+        child(extension, namespace, "DateTimeTo", date(parameters, END).plusDays(1).atStartOfDay(VIENNA).toOffsetDateTime().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
         child(extension, namespace, "AssumptionOfCosts", "false");
     }
 
@@ -492,7 +507,7 @@ public final class EdaEnergySharingXml {
         return date;
     }
 
-    private static boolean holiday(LocalDate date) {
+    static boolean holiday(LocalDate date) {
         if (FIXED_HOLIDAYS.contains(MonthDay.from(date))) {
             return true;
         }
@@ -500,7 +515,7 @@ public final class EdaEnergySharingXml {
         return List.of(1, 39, 50, 60).stream().anyMatch(offset -> date.equals(easter.plusDays(offset)));
     }
 
-    private static LocalDate easterSunday(int year) {
+    static LocalDate easterSunday(int year) {
         int a = year % 19;
         int b = year / 100;
         int c = year % 100;

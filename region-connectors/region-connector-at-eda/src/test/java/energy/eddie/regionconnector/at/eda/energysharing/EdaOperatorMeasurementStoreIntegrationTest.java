@@ -50,6 +50,28 @@ class EdaOperatorMeasurementStoreIntegrationTest {
         return store.page("scope", cursor, limit);
     }
 
+    @Test void requestDeliveryCountsOnlyExactAcceptedScopeConversationAndPoint() {
+        append("RequestedOne");
+        append("RequestedTwo");
+        assertEquals(new EdaOperatorMeasurementStore.Delivery(2, 2), store.requestDelivery("scope", "DATADEVTEST", METER));
+        assertEquals(new EdaOperatorMeasurementStore.Delivery(0, 0), store.requestDelivery("foreign", "DATADEVTEST", METER));
+        assertEquals(new EdaOperatorMeasurementStore.Delivery(0, 0), store.requestDelivery("scope", "unrelated", METER));
+        assertEquals(new EdaOperatorMeasurementStore.Delivery(0, 0), store.requestDelivery("scope", "DATADEVTEST", "unrelated"));
+    }
+
+    @Test void requestIdentityAndRosterEvidenceCommitTogetherAndRejectedAuthorityLeavesNoOperation() {
+        var denied = new EnergySharingRecord("denied", "scope", "OPERATION", "hash", "denied-market", "{}");
+        assertThrows(IllegalStateException.class, () -> snapshots.insertAuthorized(denied, "snapshot", ignored -> {
+            throw new IllegalStateException("Membership changed");
+        }));
+        assertTrue(repository.findById("denied").isEmpty());
+        var accepted = new EnergySharingRecord("accepted", "scope", "OPERATION", "hash", "accepted-market", "{}");
+        snapshots.insertAuthorized(accepted, "snapshot", payload -> MAPPER.createObjectNode()
+                .set("authority", MAPPER.readTree(payload)).toString());
+        var saved = repository.findById("accepted").orElseThrow();
+        assertEquals("revision", MAPPER.readTree(saved.payload()).path("authority").path("snapshot").path("revision").asText());
+    }
+
     @Test void sameSourceIsIdempotentDifferentContentConflictsAndOriginalBytesRemainScoped() {
         append("M1");
         append("M1");

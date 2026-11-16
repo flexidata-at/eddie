@@ -145,6 +145,20 @@ public class EdaOperatorMeasurementStore {
         return ((byte[]) rows.getFirst()).clone();
     }
 
+    public record Delivery(long documentCount, long readingCount) {}
+
+    /** Read accepted ledger metadata only. Native CR_REQ_PT04.30 mandates the same ConversationId. */
+    @Transactional(readOnly = true)
+    public Delivery requestDelivery(String scope, String conversationId, String meteringPointId) {
+        var row = (Object[]) entityManager.createNativeQuery("""
+                SELECT COUNT(*), COALESCE(SUM(reading_count),0) FROM at_eda.operator_measurement_document
+                WHERE scope=:scope AND CAST(payload AS jsonb)->>'sourceConversationId'=:conversation
+                  AND CAST(payload AS jsonb)->>'meteringPointId'=:meter
+                """).setParameter(SCOPE, scope).setParameter("conversation", conversationId)
+                .setParameter("meter", meteringPointId).getSingleResult();
+        return new Delivery(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
+    }
+
     private String snapshot(String id) {
         var rows = entityManager.createNativeQuery("SELECT payload FROM at_eda.energy_sharing_record WHERE id=:id AND kind='SNAPSHOT' FOR SHARE")
                 .setParameter("id", id).getResultList();
