@@ -28,6 +28,7 @@ import tools.jackson.databind.node.*;
 /** Durable, connection-scoped management of EDA market requests. */
 @Component
 public class EdaEnergySharingService implements RegionConnectorEnergySharingService {
+  private static final String OPERATOR_MEASUREMENT_UNAVAILABLE = "Operator measurement service unavailable";
   private static final String SYNC_MASTER_DATA = "SYNC_MASTER_DATA";
   private static final String LEAVE = "LEAVE";
   private static final String CHANGE_PARTICIPATION_FACTOR = "CHANGE_PARTICIPATION_FACTOR";
@@ -438,20 +439,20 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
 
   @Override
   public EnergySharingMeasurementPage measurements(String operatorId, String connectionId, String communityId, long afterSequence, int limit) {
-    return Objects.requireNonNull(operatorMeasurements, "Operator measurement service unavailable")
+    return Objects.requireNonNull(operatorMeasurements, OPERATOR_MEASUREMENT_UNAVAILABLE)
         .measurements(operatorId, connectionId, communityId, afterSequence, limit);
   }
 
   @Override
   public EnergySharingMeasurementImportResult importMeasurement(String operatorId, String connectionId, String communityId,
       EnergySharingMeasurementImport request) {
-    return Objects.requireNonNull(operatorMeasurements, "Operator measurement service unavailable")
+    return Objects.requireNonNull(operatorMeasurements, OPERATOR_MEASUREMENT_UNAVAILABLE)
         .importArchive(operatorId, connectionId, communityId, request);
   }
 
   @Override
   public byte[] measurementSource(String operatorId, String connectionId, String communityId, String documentId) {
-    return Objects.requireNonNull(operatorMeasurements, "Operator measurement service unavailable")
+    return Objects.requireNonNull(operatorMeasurements, OPERATOR_MEASUREMENT_UNAVAILABLE)
         .source(operatorId, connectionId, communityId, documentId);
   }
 
