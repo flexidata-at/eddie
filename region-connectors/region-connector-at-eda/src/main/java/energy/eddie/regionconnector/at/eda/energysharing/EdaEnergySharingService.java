@@ -73,6 +73,7 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
   private final ObjectMapper mapper;
   private final Clock clock;
   private final EdaGroupingIdFactory groupingIds;
+  private @org.jspecify.annotations.Nullable EdaOperatorMeasurementService operatorMeasurements;
 
   @Autowired
   public EdaEnergySharingService(
@@ -428,6 +429,23 @@ public class EdaEnergySharingService implements RegionConnectorEnergySharingServ
     if (failed) state = RECONCILIATION_REQUIRED;
     if (complete) state = COMPLETED;
     return copy(op, state, op.nativeCode(), op.message(), result);
+  }
+
+  @Autowired
+  public void setOperatorMeasurements(EdaOperatorMeasurementService service) {
+    this.operatorMeasurements = service;
+  }
+
+  @Override
+  public EnergySharingMeasurementPage measurements(String operatorId, String connectionId, String communityId, long afterSequence, int limit) {
+    return Objects.requireNonNull(operatorMeasurements, "Operator measurement service unavailable")
+        .measurements(operatorId, connectionId, communityId, afterSequence, limit);
+  }
+
+  @Override
+  public byte[] measurementSource(String operatorId, String connectionId, String communityId, String documentId) {
+    return Objects.requireNonNull(operatorMeasurements, "Operator measurement service unavailable")
+        .source(operatorId, connectionId, communityId, documentId);
   }
 
   @Override

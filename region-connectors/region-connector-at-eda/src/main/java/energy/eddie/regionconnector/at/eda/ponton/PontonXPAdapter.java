@@ -317,11 +317,34 @@ public class PontonXPAdapter implements EdaAdapter {
         return handleEmitResult(result);
     }
 
+    private java.util.function.Predicate<EdaConsumptionRecord> operatorConsumptionRecords = ignored -> false;
+
+    public void withOperatorConsumptionRecords(java.util.function.Predicate<EdaConsumptionRecord> handler) {
+        this.operatorConsumptionRecords = java.util.Objects.requireNonNull(handler);
+    }
+
+    private boolean storeOperatorConsumptionRecord(EdaConsumptionRecord consumptionRecord) {
+        try {
+            return operatorConsumptionRecords.test(consumptionRecord);
+        } catch (energy.eddie.api.agnostic.energysharing.EnergySharingException exception) {
+            if (exception.code() != energy.eddie.api.agnostic.energysharing.EnergySharingException.Code.FORBIDDEN) {
+                throw exception;
+            }
+            // A narrower operator mandate must not invalidate an independent existing customer permission.
+            return false;
+        }
+    }
+
     private InboundMessageResult handleConsumptionRecordMessage(EdaConsumptionRecord consumptionRecord) {
+        // Operator authorization is independent; existing consent streams still receive matching records.
+        boolean operatorStored = storeOperatorConsumptionRecord(consumptionRecord);
         var identifiableConsumptionRecord = identifiableConsumptionRecordService
                 .mapToIdentifiableConsumptionRecord(consumptionRecord);
 
         if (identifiableConsumptionRecord.isEmpty()) {
+            if (operatorStored) {
+                return new InboundMessageResult(InboundStatusEnum.SUCCESS, "Operator measurement durably stored");
+            }
             /*
              * This rescheduling is essentially only necessary for the case, where a customer accepts a PermissionRequest for multiple MeteringPoints
              * and when the DSO then sends the Data for the MeteringPoints before the "ZUSTIMMUNG_CCMO".

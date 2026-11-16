@@ -15,7 +15,22 @@ import java.util.Optional;
 
 import static energy.eddie.regionconnector.at.eda.EdaRegionConnectorMetadata.AT_ZONE_ID;
 
-public record EdaConsumptionRecord01p41(ConsumptionRecord consumptionRecord) implements EdaConsumptionRecord {
+public record EdaConsumptionRecord01p41(ConsumptionRecord consumptionRecord, String encodedOriginalXml) implements EdaConsumptionRecord {
+    public EdaConsumptionRecord01p41(ConsumptionRecord consumptionRecord) {
+        this(consumptionRecord, "");
+    }
+
+    @Override
+    public String toString() {
+        return "EdaConsumptionRecord01p41[messageId=" + messageId() + ", originalXmlRetained=" + !encodedOriginalXml.isEmpty() + "]";
+    }
+
+    @Override
+    public Optional<byte[]> originalXml() {
+        return encodedOriginalXml.isEmpty() ? Optional.empty()
+                : Optional.of(java.util.Base64.getDecoder().decode(encodedOriginalXml));
+    }
+
     @Override
     public String messageId() {
         return consumptionRecord.getProcessDirectory().getMessageId();

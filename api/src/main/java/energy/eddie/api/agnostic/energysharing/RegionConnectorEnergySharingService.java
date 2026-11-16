@@ -18,4 +18,16 @@ public interface RegionConnectorEnergySharingService {
     EnergySharingOperation submit(EnergySharingRequest request);
     Optional<EnergySharingOperation> operation(String requestId, String connectionId, String operatorId, String communityId);
     List<EnergySharingCommunitySnapshot> communities(String operatorId, String connectionId);
+
+    default EnergySharingMeasurementPage measurements(String operatorId, String connectionId, String communityId,
+                                                       long afterSequence, int limit) {
+        throw new EnergySharingException(EnergySharingException.Code.UNSUPPORTED,
+                "This connector does not provide operator measurements");
+    }
+
+    /** Exact original XML, available only after the same operator/community authorization as the feed. */
+    default byte[] measurementSource(String operatorId, String connectionId, String communityId, String documentId) {
+        throw new EnergySharingException(EnergySharingException.Code.UNSUPPORTED,
+                "This connector does not provide original operator measurement documents");
+    }
 }

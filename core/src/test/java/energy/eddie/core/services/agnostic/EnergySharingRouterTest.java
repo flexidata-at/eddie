@@ -26,6 +26,26 @@ class EnergySharingRouterTest {
     }
 
     @Test
+    void measurementsRequireExactReturnedScopeAndValidBounds() {
+        var page = new EnergySharingMeasurementPage("XX", "connection", "operator", "community", 5, 7, false, List.of());
+        when(service.measurements("operator", "connection", "community", 5, 20)).thenReturn(page);
+        assertSame(page, router.measurements("future-country", "community", "operator", "connection", 5, 20));
+        var wrong = new EnergySharingMeasurementPage("XX", "foreign", "operator", "community", 5, 7, false, List.of());
+        when(service.measurements("operator", "connection", "community", 5, 20)).thenReturn(wrong);
+        assertThrows(EnergySharingException.class, () -> router.measurements("future-country", "community", "operator", "connection", 5, 20));
+        assertThrows(EnergySharingException.class, () -> router.measurements("future-country", "community", "operator", "connection", -1, 20));
+        assertThrows(EnergySharingException.class, () -> router.measurements("future-country", "community", "operator", "connection", 0, 101));
+    }
+
+    @Test
+    void sourceRoutesExactScopeAndRejectsMissingDocument() {
+        byte[] source = "<source/>".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        when(service.measurementSource("operator", "connection", "community", "document")).thenReturn(source);
+        assertArrayEquals(source, router.measurementSource("future-country", "community", "operator", "connection", "document"));
+        assertThrows(EnergySharingException.class, () -> router.measurementSource("future-country", "community", "operator", "connection", ""));
+    }
+
+    @Test
     void routesWithoutAnyAustrianAssumptionsAndPreservesAsyncState() {
         var request = request("1");
         var operation = operation("connection");

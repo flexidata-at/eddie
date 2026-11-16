@@ -33,6 +33,22 @@ class EnergySharingManagementControllerTest {
     }
 
     @Test
+    void exposesBoundedScopedFeedAndNoStoreOriginalOnlyOnManagementRoutes() throws Exception {
+        when(router.measurements("at-eda", "community", "operator", "connection", 0, 20))
+                .thenReturn(new EnergySharingMeasurementPage("AT", "connection", "operator", "community", 0, 0, false, java.util.List.of()));
+        mvc.perform(get("/management/energy-sharing/at-eda/communities/community/measurements")
+                .param("operatorId", "operator").param("connectionId", "connection"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.countryCode").value("AT"))
+                .andExpect(jsonPath("$.nextSequence").value(0));
+        when(router.measurementSource("at-eda", "community", "operator", "connection", "doc"))
+                .thenReturn("<source/>".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        mvc.perform(get("/management/energy-sharing/at-eda/communities/community/measurement-documents/doc/source")
+                .param("operatorId", "operator").param("connectionId", "connection"))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(content().contentType("application/xml")).andExpect(content().string("<source/>"));
+    }
+
+    @Test
     void serializesSubmittedAsAcceptedHttpButNotActiveMembership() throws Exception {
         var now = Instant.parse("2026-11-15T10:00:00Z");
         when(router.submit(eq("at-eda"), any())).thenReturn(new EnergySharingOperation("req", "connection", "operator",

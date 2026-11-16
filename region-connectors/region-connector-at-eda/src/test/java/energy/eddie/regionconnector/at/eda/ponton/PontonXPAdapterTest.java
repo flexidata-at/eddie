@@ -289,6 +289,53 @@ class PontonXPAdapterTest {
     }
 
     @Test
+    void operatorOnlyRecordIsAcknowledgedWithoutReschedulingOrCustomerGrant() {
+        EdaConsumptionRecord record = new SimpleEdaConsumptionRecord();
+        pontonXPAdapter.withOperatorConsumptionRecords(ignored -> true);
+        when(identifiableConsumptionRecordService.mapToIdentifiableConsumptionRecord(record)).thenReturn(Optional.empty());
+        var result = pontonMessengerConnection.consumptionRecordHandler.handle(record);
+        assertEquals(InboundStatusEnum.SUCCESS, result.status());
+        org.mockito.Mockito.verifyNoInteractions(taskScheduler);
+    }
+
+    @Test
+    void operatorPersistenceStillEmitsExistingCustomerConsentStream() {
+        EdaConsumptionRecord record = new SimpleEdaConsumptionRecord();
+        var identified = new IdentifiableConsumptionRecord(record, List.of(), null, null);
+        var stored = new java.util.concurrent.atomic.AtomicBoolean();
+        pontonXPAdapter.withOperatorConsumptionRecords(ignored -> { stored.set(true); return true; });
+        when(identifiableConsumptionRecordService.mapToIdentifiableConsumptionRecord(record)).thenReturn(Optional.of(identified));
+        var verifier = StepVerifier.create(pontonXPAdapter.getConsumptionRecordStream()).expectNext(identified).expectComplete();
+        assertEquals(InboundStatusEnum.SUCCESS, pontonMessengerConnection.consumptionRecordHandler.handle(record).status());
+        assertTrue(stored.get());
+        pontonXPAdapter.close();
+        verifier.verify();
+    }
+
+    @Test
+    void operatorForbiddenStillDeliversAnIndependentValidCustomerPermission() {
+        EdaConsumptionRecord consumptionRecord = new SimpleEdaConsumptionRecord();
+        var identified = new IdentifiableConsumptionRecord(consumptionRecord, List.of(), null, null);
+        pontonXPAdapter.withOperatorConsumptionRecords(ignored -> {
+            throw new energy.eddie.api.agnostic.energysharing.EnergySharingException(
+                    energy.eddie.api.agnostic.energysharing.EnergySharingException.Code.FORBIDDEN, "Outside operator scope");
+        });
+        when(identifiableConsumptionRecordService.mapToIdentifiableConsumptionRecord(consumptionRecord)).thenReturn(Optional.of(identified));
+        var verifier = StepVerifier.create(pontonXPAdapter.getConsumptionRecordStream()).expectNext(identified).expectComplete();
+        assertEquals(InboundStatusEnum.SUCCESS, pontonMessengerConnection.consumptionRecordHandler.handle(consumptionRecord).status());
+        pontonXPAdapter.close();
+        verifier.verify();
+    }
+
+    @Test
+    void transientOperatorPersistenceFailureRemainsRetryableWithoutFalseAcknowledgement() {
+        EdaConsumptionRecord consumptionRecord = new SimpleEdaConsumptionRecord();
+        pontonXPAdapter.withOperatorConsumptionRecords(ignored -> { throw new IllegalStateException("Database temporarily unavailable"); });
+        assertThrows(IllegalStateException.class, () -> pontonMessengerConnection.consumptionRecordHandler.handle(consumptionRecord));
+        org.mockito.Mockito.verifyNoInteractions(identifiableConsumptionRecordService);
+    }
+
+    @Test
     void handleConsumptionRecordMessage_whenIdentifiableConsumptionRecordServiceCantMapRecord_returnsReject() {
         // Given
         EdaConsumptionRecord consumptionRecord = new SimpleEdaConsumptionRecord().setDocumentCreationDateTime(

@@ -87,6 +87,29 @@ public class EnergySharingRouter {
         return result;
     }
 
+    public EnergySharingMeasurementPage measurements(String regionConnectorId, String communityId,
+            String operatorId, String connectionId, long afterSequence, int limit) {
+        requireScope(operatorId, connectionId);
+        if (communityId.isBlank() || afterSequence < 0 || limit < 1 || limit > 100) {
+            throw new EnergySharingException(INVALID_REQUEST, "A community, nonnegative cursor and limit 1–100 are required");
+        }
+        var result = service(regionConnectorId).measurements(operatorId, connectionId, communityId, afterSequence, limit);
+        if (!operatorId.equals(result.operatorId()) || !connectionId.equals(result.connectionId())
+                || !communityId.equals(result.communityId()) || afterSequence != result.afterSequence()) {
+            throw new EnergySharingException(FORBIDDEN, "Measurement scope mismatch");
+        }
+        return result;
+    }
+
+    public byte[] measurementSource(String regionConnectorId, String communityId,
+            String operatorId, String connectionId, String documentId) {
+        requireScope(operatorId, connectionId);
+        if (communityId.isBlank() || documentId.isBlank()) {
+            throw new EnergySharingException(INVALID_REQUEST, "Community and document are required");
+        }
+        return service(regionConnectorId).measurementSource(operatorId, connectionId, communityId, documentId);
+    }
+
     private static void requireScope(String operatorId, String connectionId) {
         if (operatorId.isBlank() || connectionId.isBlank()) {
             throw new EnergySharingException(INVALID_REQUEST, "Operator and connection scope are required");

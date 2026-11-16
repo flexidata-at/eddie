@@ -40,4 +40,7 @@ public interface EdaConsumptionRecord {
     ZonedDateTime processDate();
 
     Object originalConsumptionRecord();
+
+    /** Exact wire bytes, when retained by the national inbound parser. */
+    default Optional<byte[]> originalXml() { return Optional.empty(); }
 }

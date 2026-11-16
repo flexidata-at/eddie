@@ -11,6 +11,10 @@ import org.springframework.stereotype.Component;
 
 import javax.xml.transform.stream.StreamSource;
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.Base64;
 import java.time.LocalDate;
 
 @Component
@@ -20,6 +24,7 @@ public class EdaConsumptionRecord01p41InboundMessageFactory implements EdaConsum
      * <p>From <a href="https://www.ebutilities.at/schemas/240">ebutilities</a>
      */
     private static final LocalDate ACTIVE_FROM = LocalDate.of(2025, 10, 6);
+    public static final int MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
     private final Jaxb2Marshaller marshaller;
 
     public EdaConsumptionRecord01p41InboundMessageFactory(Jaxb2Marshaller marshaller) {
@@ -34,7 +39,15 @@ public class EdaConsumptionRecord01p41InboundMessageFactory implements EdaConsum
 
     @Override
     public EdaConsumptionRecord parseInputStream(InputStream inputStream) {
-        var consumptionRecord = (ConsumptionRecord) marshaller.unmarshal(new StreamSource(inputStream));
-        return new EdaConsumptionRecord01p41(consumptionRecord);
+        try {
+            var bytes = inputStream.readNBytes(MAX_MESSAGE_BYTES + 1);
+            if (bytes.length > MAX_MESSAGE_BYTES) {
+                throw new org.springframework.oxm.UnmarshallingFailureException("Consumption record exceeds 16 MiB");
+            }
+            var consumptionRecord = (ConsumptionRecord) marshaller.unmarshal(new StreamSource(new ByteArrayInputStream(bytes)));
+            return new EdaConsumptionRecord01p41(consumptionRecord, Base64.getEncoder().encodeToString(bytes));
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Cannot read consumption record", exception);
+        }
     }
 }

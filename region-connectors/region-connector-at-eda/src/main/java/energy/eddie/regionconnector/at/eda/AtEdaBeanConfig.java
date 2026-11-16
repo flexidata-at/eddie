@@ -64,13 +64,16 @@ public class AtEdaBeanConfig {
             IdentifiableConsumptionRecordService identifiableConsumptionRecordService,
             IdentifiableMasterDataService identifiableMasterDataService,
             IdentifyECMPListTask task,
-            TaskScheduler taskScheduler
+            TaskScheduler taskScheduler,
+            energy.eddie.regionconnector.at.eda.energysharing.EdaOperatorMeasurementService operatorMeasurements
     ) {
-        return new PontonXPAdapter(pontonMessengerConnection,
+        var adapter = new PontonXPAdapter(pontonMessengerConnection,
                                    identifiableConsumptionRecordService,
                                    identifiableMasterDataService,
                                    task,
                                    taskScheduler);
+        adapter.withOperatorConsumptionRecords(operatorMeasurements::ingest);
+        return adapter;
     }
 
     @Bean

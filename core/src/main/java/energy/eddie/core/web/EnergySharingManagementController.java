@@ -70,4 +70,20 @@ public class EnergySharingManagementController {
         };
         return ResponseEntity.status(status).body(Map.of("code", exception.code().name(), "message", exception.getMessage()));
     }
+
+    @GetMapping("/{regionConnectorId}/communities/{communityId}/measurements")
+    public EnergySharingMeasurementPage measurements(@PathVariable String regionConnectorId,
+            @PathVariable String communityId, @RequestParam String operatorId, @RequestParam String connectionId,
+            @RequestParam(defaultValue = "0") long afterSequence, @RequestParam(defaultValue = "20") int limit) {
+        return router.measurements(regionConnectorId, communityId, operatorId, connectionId, afterSequence, limit);
+    }
+
+    @GetMapping(value = "/{regionConnectorId}/communities/{communityId}/measurement-documents/{documentId}/source",
+                produces = "application/xml")
+    public ResponseEntity<byte[]> measurementSource(@PathVariable String regionConnectorId,
+            @PathVariable String communityId, @PathVariable String documentId,
+            @RequestParam String operatorId, @RequestParam String connectionId) {
+        return ResponseEntity.ok().header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff")
+                .body(router.measurementSource(regionConnectorId, communityId, operatorId, connectionId, documentId));
+    }
 }

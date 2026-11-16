@@ -89,6 +89,23 @@ class EdaConsumptionRecord01p41InboundMessageFactoryTest {
 
 
     @Test
+    void preservesExactWireAndRejectsOversizedInputBeforeUnmarshalling() throws IOException {
+        var factory = new EdaConsumptionRecord01p41InboundMessageFactory(marshaller);
+        byte[] source;
+        try (var input = getClass().getResourceAsStream("/xsd/consumptionrecord/_01p41/consumptionrecord_daily.xml")) {
+            source = java.util.Objects.requireNonNull(input).readAllBytes();
+        }
+        var record = factory.parseInputStream(new java.io.ByteArrayInputStream(source));
+        assertArrayEquals(source, record.originalXml().orElseThrow());
+        byte[] altered = record.originalXml().orElseThrow();
+        altered[0] = 0;
+        assertArrayEquals(source, record.originalXml().orElseThrow());
+        assertFalse(record.toString().contains("MarketParticipantDirectory"));
+        var tooLarge = new java.io.ByteArrayInputStream(new byte[EdaConsumptionRecord01p41InboundMessageFactory.MAX_MESSAGE_BYTES + 1]);
+        assertThrows(org.springframework.oxm.UnmarshallingFailureException.class, () -> factory.parseInputStream(tooLarge));
+    }
+
+    @Test
     void isActive_on_2025_10_05_returnsFalse() {
         // given
         var factory = new EdaConsumptionRecord01p41InboundMessageFactory(marshaller);
